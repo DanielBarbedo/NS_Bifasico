@@ -23,6 +23,10 @@ public:
 	
 	Semi_Lagrangiano(Malha& malha);
 	void semi_lagrangiano(Malha& malha, VectorXd& vx, VectorXd& vy,	double delta_t, VectorXd& prop, bool apenas_vert);
+	
+	//Estão aqui pq precisamos interpolar a velocidade pra fazer a malha da interface se mover
+	long busca_linear(Malha& malha, double x, double y);
+	double interpolar_Tri_Linear(Malha& malha, double x, double y, long elem_index, const VectorXd& prop);
 
 private:
 
@@ -36,9 +40,8 @@ private:
 
 	unsigned long buscar_no_prox2(Malha& malha, double x, double y);
 
-	long busca_linear(Malha& malha, double x, double y);
-	double area_triangulo(double x1, double y1, double x2, double y2, double x3, double y3);
-	double interpolar_Tri_Linear(Malha& malha, double x, double y, long elem_index, const VectorXd& prop);
+	//long busca_linear(Malha& malha, double x, double y);
+	double area_triangulo(double x1, double y1, double x2, double y2, double x3, double y3);	
 	bool checar_ponto_dentro_elem(unsigned long elem_index, double x, double y, Malha& malha);
 
 	vector< vector<unsigned long> > nos_elem_vec;

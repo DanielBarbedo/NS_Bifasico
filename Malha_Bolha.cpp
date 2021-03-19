@@ -128,11 +128,15 @@ void Malha_Bolha::mostrar_malha()
 	cout << endl;
 }
 
-void Malha_Bolha::atualizar_posicao(const VectorXd& vx, const VectorXd& vy, double dt)
-{
+void Malha_Bolha::atualizar_posicao(Malha& malha, Semi_Lagrangiano& sl, const VectorXd& vx, const VectorXd& vy, double dt)
+{	
 	for (unsigned int i = 0; i < m_no_vec.size(); i++)
 	{
-		m_no_vec[i].x += vx[i] * dt;
-		m_no_vec[i].y += vy[i] * dt;
+		long el_index = sl.busca_linear(malha, m_no_vec[i].x, m_no_vec[i].y);
+		if (el_index == -1) cout << "Malha_Bolha::atualizar_posicao, elemento fora do dominio" << endl;
+		double vx_ponto = sl.interpolar_Tri_Linear(malha, m_no_vec[i].x, m_no_vec[i].y, el_index, vx);
+		double vy_ponto = sl.interpolar_Tri_Linear(malha, m_no_vec[i].x, m_no_vec[i].y, el_index, vy);
+		m_no_vec[i].x += vx_ponto * dt;
+		m_no_vec[i].y += vy_ponto * dt;
 	}
 }

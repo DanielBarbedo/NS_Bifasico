@@ -377,18 +377,11 @@ double Semi_Lagrangiano::interpolar_contorno(Malha& malha, unsigned long elem_in
 
 long Semi_Lagrangiano::busca_linear(Malha& malha, double x, double y)
 {
-	contagem_busca_linear++;
-
-	system_clock::time_point t1 = system_clock::now();
-
 	//Busca linear, percorrendo todos elementos
 	for (unsigned int i = 0; i < malha.r_num_elem(); i++)
 	{
 		if (checar_ponto_dentro_elem(i, x, y, malha) == true) return i;
 	}
-
-	system_clock::time_point t2 = system_clock::now();
-	duracao_busca_linear += duration_cast<milliseconds>(t2 - t1).count();
 	return -1;
 }
 

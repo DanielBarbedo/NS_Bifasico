@@ -868,16 +868,16 @@ void NavierStokes2D::montar_matriz_G_e_D_proj(SparseMatrix<double, Eigen::RowMaj
 	{
 		for (SparseMatrix<double>::InnerIterator it(Gx, i); it; ++it)
 		{
-			G_triplets.push_back(Triplet<double>(it.row(), it.col(), it.value()));
-			D_triplets.push_back(Triplet<double>(it.col(), it.row(), it.value()));
+			G_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), it.value()));
+			D_triplets.push_back(Triplet<double>((long)it.col(), (long)it.row(), it.value()));
 		}
 	}
 	for (int i = 0; i < Gy.outerSize(); ++i)
 	{
 		for (SparseMatrix<double>::InnerIterator it(Gy, i); it; ++it)
 		{
-			G_triplets.push_back(Triplet<double>(it.row() + gl, it.col(), it.value()));
-			D_triplets.push_back(Triplet<double>(it.col(), it.row() + gl, it.value()));
+			G_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col(), it.value()));
+			D_triplets.push_back(Triplet<double>((long)it.col(), (long)it.row() + gl, it.value()));
 		}
 	}
 
