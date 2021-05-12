@@ -205,6 +205,17 @@ void Malha::ler_elementos(ifstream& arquivo)
 				arquivo >> str;
 				elem.nos.push_back(stoul(str) - 1);
 			}
+
+			//arquivo >> str;
+			//long no1 = stoul(str) - 1;
+			//arquivo >> str;
+			//long no2 = stoul(str) - 1;
+			//arquivo >> str;
+			//long no3 = stoul(str) - 1;
+			//elem.nos.push_back(no3);
+			//elem.nos.push_back(no2);
+			//elem.nos.push_back(no1);
+
 			m_elem_vec.push_back(elem);
 		}
 	}

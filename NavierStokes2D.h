@@ -22,20 +22,27 @@ public:
 	NavierStokes2D(string nome);
 	void resolver_stokes_permanente();
 	void resolver_stokes_transiente(double delta_t, unsigned long max_iter);
-	void resolver_navier_stokes(double delta_t, unsigned long max_iter, double ni, double rho, bool sl_vert_only, string tag);
+	void resolver_navier_stokes(double delta_t, unsigned long max_iter, double Re, string tag);
 	
 	//Projecao
-	void resolver_navier_stokes_projecao(double delta_t, unsigned long max_iter, double ni, double rho);
+	void resolver_navier_stokes_projecao(double delta_t, unsigned long max_iter, double Re, string tag);
+
+	//Avaliação de propriedade em uma linha qualquer
+	void gerar_linha_prop(int num_pontos, double xo, double yo, double x, double y);
 
 
 private:
 
 	void montar_matrizes_fixas(SparseMatrix<double>& K, SparseMatrix<double>& M, SparseMatrix<double>& Gx, SparseMatrix<double>& Gy);
-	vector<Triplet<double>> montar_matriz_A(bool transiente, double delta_t, double ni, double rho);
+	vector<Triplet<double>> montar_matriz_A(bool transiente, double delta_t, double Re);
 	void aplicar_cc_A(SparseMatrix<double, Eigen::RowMajor>& A);
 	void aplicar_cc_B(VectorXd& B);
-	void gerar_arquivo_saida(VectorXd& B, unsigned long iter, double delta_t, double ni, double rho, string tag);
+	void gerar_arquivo_saida(VectorXd& B, unsigned long iter, double delta_t, double Re, string tag);
 
+	//Avaliação de propriedade em uma linha qualquer
+	void avaliar_prop(VectorXd& prop, Semi_Lagrangiano& sl, string tag, int num_pontos, double xo, double yo, double x, double y);
+	
+	
 	//CC linha e coluna
 	void aplicar_cc_linha_e_coluna(SparseMatrix<double, Eigen::RowMajor>& A);
 
@@ -59,4 +66,8 @@ private:
 	SparseMatrix<double> M;
 	SparseMatrix<double> Gx;
 	SparseMatrix<double> Gy;
+
+	//---Avaliação de propriedade---
+	double linha_prop_x, linha_prop_xo, linha_prop_y, linha_prop_yo;
+	int linha_prop_num_pontos;
 };

@@ -25,6 +25,7 @@ private:
 
 	void ler_nos(ifstream& arquivo);
 	void ler_elementos(ifstream& arquivo);	
+	double interpolar_Tri_Linear(Malha& malha, double x, double y, long elem_index, const VectorXd& prop);
 
 	No m_no_centro;
 	vector<No> m_no_vec;

@@ -16,6 +16,9 @@ NavierStokes2D::NavierStokes2D(string nome)
 	M = SparseMatrix<double>(gl, gl);
 	Gx = SparseMatrix<double>(gl, vert);
 	Gy = SparseMatrix<double>(gl, vert);
+
+	//---Avaliacao de propriedade---
+	gerar_linha_prop(0, 0, 0, 0, 0);
 }
 
 void NavierStokes2D::resolver_stokes_permanente()
@@ -32,7 +35,7 @@ void NavierStokes2D::resolver_stokes_permanente()
 	VectorXd sol(gl * 2 + vert);
 	B.fill(0);
 	SparseMatrix<double, Eigen::RowMajor> A(2 * gl + vert, 2 * gl + vert);	
-	vector<Triplet<double>> A_triplets = montar_matriz_A(false, 1, 1, 1);
+	vector<Triplet<double>> A_triplets = montar_matriz_A(false, 1, 1);
 	A.setFromTriplets(A_triplets.begin(), A_triplets.end());
 	t2 = system_clock::now();
 	cout << "O assembly de A levou " << duration_cast<seconds>(t2 - t1).count() << " segundos" << endl << endl;
@@ -56,7 +59,7 @@ void NavierStokes2D::resolver_stokes_permanente()
 
 	cout << "Gerando arquivo de saída" << endl;
 	t1 = system_clock::now();
-	gerar_arquivo_saida(sol, 0, 1, 1, 1, "Perm");
+	gerar_arquivo_saida(sol, 0, 1, 1, "Perm");
 	t2 = system_clock::now();
 	cout << "A geracao do arquivo de saida levou " << duration_cast<seconds>(t2 - t1).count() << " segundos" << endl << endl;
 }
@@ -68,7 +71,7 @@ void NavierStokes2D::resolver_stokes_transiente(double delta_t, unsigned long ma
 
 	cout << "Montando matriz A a partir das matrizes fixas" << endl;
 	SparseMatrix<double, Eigen::RowMajor> A(2 * gl + vert, 2 * gl + vert);
-	vector<Triplet<double>> A_triplets = montar_matriz_A(true, delta_t, 1, 1);
+	vector<Triplet<double>> A_triplets = montar_matriz_A(true, delta_t, 1);
 	A.setFromTriplets(A_triplets.begin(), A_triplets.end());
 	
 	cout << "Aplicando condicoes de contorno a matriz A" << endl;
@@ -100,11 +103,11 @@ void NavierStokes2D::resolver_stokes_transiente(double delta_t, unsigned long ma
 		if (solver.info() != EXIT_SUCCESS) cout << "Decomposicao falhou" << endl;
 		sol = solver.solve(B);
 
-		gerar_arquivo_saida(sol, i, delta_t, 1, 1, "Transiente");
-	}
+		gerar_arquivo_saida(sol, i, delta_t, 1, "Transiente");		
+	}	
 }
 
-void NavierStokes2D::resolver_navier_stokes(double delta_t, unsigned long max_iter, double ni, double rho, bool sl_vert_only, string tag)
+void NavierStokes2D::resolver_navier_stokes(double delta_t, unsigned long max_iter, double Re, string tag)
 {
 	system_clock::time_point total1 = system_clock::now();
 	
@@ -117,7 +120,7 @@ void NavierStokes2D::resolver_navier_stokes(double delta_t, unsigned long max_it
 	cout << "Montando A a partir das matrizes fixas" << endl;
 	t1 = system_clock::now();
 	SparseMatrix<double, Eigen::RowMajor> A(2 * gl + vert, 2 * gl + vert);
-	vector<Triplet<double>> A_triplets = montar_matriz_A(true, delta_t, ni, rho);
+	vector<Triplet<double>> A_triplets = montar_matriz_A(true, delta_t, Re);
 	A.setFromTriplets(A_triplets.begin(), A_triplets.end());
 	t2 = system_clock::now();
 	cout << "A montagem de A levou " << duration_cast<seconds>(t2 - t1).count() << " segundos" << endl << endl;
@@ -139,10 +142,10 @@ void NavierStokes2D::resolver_navier_stokes(double delta_t, unsigned long max_it
 	VectorXd sol(gl * 2 + vert);	
 	VectorXd vx(gl);
 	VectorXd vy(gl);
-	VectorXd vx_temp(gl);
-	VectorXd vy_temp(gl);
-	vx.fill(0);
-	vy.fill(0);
+	//VectorXd vx_temp(gl);
+	//VectorXd vy_temp(gl);
+	//vx.fill(0);
+	//vy.fill(0);
 	sol.fill(0);
 
 	for (unsigned int i = 0; i < max_iter; i++)
@@ -150,13 +153,12 @@ void NavierStokes2D::resolver_navier_stokes(double delta_t, unsigned long max_it
 		cout << "Iteracao: " << i << endl;
 		t1 = system_clock::now();	
 
-		vx_temp = sol.head(gl);
-		vy_temp = sol.segment(gl, gl);
-		cout << "Utilizando semi lagrangiano" << endl;
-		SL.semi_lagrangiano(malha, vx, vy, delta_t, vx_temp, sl_vert_only);
-		SL.semi_lagrangiano(malha, vx, vy, delta_t, vy_temp, sl_vert_only);
-		vx = vx_temp;
-		vy = vy_temp;
+		vx = sol.head(gl);
+		vy = sol.segment(gl, gl);
+		cout << "Utilizando semi lagrangiano" << endl;		
+		SL.semi_lagrangiano(malha, vx, vy, delta_t);
+		SL.multiplicar_SL(vx); //Plotar as velocidades convectadas
+		SL.multiplicar_SL(vy);
 
 		B.fill(0);
 		B.head(gl) = M * ((double)1 / delta_t) * vx;
@@ -172,12 +174,14 @@ void NavierStokes2D::resolver_navier_stokes(double delta_t, unsigned long max_it
 		if (solver.info() != EXIT_SUCCESS) cout << "Decomposicao falhou" << endl;
 		sol = solver.solve(B);
 
-		gerar_arquivo_saida(sol, i, delta_t, ni, rho, tag);
+		gerar_arquivo_saida(sol, i, delta_t, Re, tag);
 		t2 = system_clock::now();
 		cout << "A iteracao " << i << " levou " << duration_cast<seconds>(t2 - t1).count() << " segundos" << endl << endl;
 
 		//system("pause");
 	}
+
+	avaliar_prop(sol, SL, tag, linha_prop_num_pontos, linha_prop_xo, linha_prop_yo, linha_prop_x, linha_prop_y);
 
 	system_clock::time_point total2 = system_clock::now();
 	cout << "A malha possui " << gl << " nos, e " << malha.r_num_elem() << " elementos." << endl;
@@ -396,7 +400,7 @@ void NavierStokes2D::montar_matrizes_fixas(SparseMatrix<double>& K, SparseMatrix
 	Gy.setFromTriplets(Gy_triplets.begin(), Gy_triplets.end());
 }
 
-vector<Triplet<double>> NavierStokes2D::montar_matriz_A(bool transiente, double delta_t, double ni, double rho)
+vector<Triplet<double>> NavierStokes2D::montar_matriz_A(bool transiente, double delta_t, double Re)
 {
 	vector<Triplet<double>> A_triplets;
 	for (int i = 0; i < K.outerSize(); ++i)
@@ -407,24 +411,24 @@ vector<Triplet<double>> NavierStokes2D::montar_matriz_A(bool transiente, double 
 			//it.row();   // row index
 			//it.col();   // col index (here it is equal to k)
 			//it.index(); // inner index, here it is equal to it.row()
-			A_triplets.push_back(Triplet<double>(it.row(), it.col(), ni * it.value()));
-			A_triplets.push_back(Triplet<double>(it.row() + gl, it.col() + gl, ni * it.value()));
+			A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), it.value() / Re));
+			A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, it.value() / Re));
 		}
 	}
 	for (int i = 0; i < Gx.outerSize(); ++i)
 	{
 		for (SparseMatrix<double>::InnerIterator it(Gx, i); it; ++it)
 		{
-			A_triplets.push_back(Triplet<double>(it.row(), it.col() + gl * 2, ((double)1 / rho) * it.value()));
-			A_triplets.push_back(Triplet<double>(it.col() + gl * 2, it.row(), -it.value()));
+			A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col() + gl * 2, it.value()));
+			A_triplets.push_back(Triplet<double>((long)it.col() + gl * 2, (long)it.row(), -it.value()));
 		}
 	}
 	for (int i = 0; i < Gy.outerSize(); ++i)
 	{
 		for (SparseMatrix<double>::InnerIterator it(Gy, i); it; ++it)
 		{
-			A_triplets.push_back(Triplet<double>(it.row() + gl, it.col() + gl * 2, ((double)1 / rho) * it.value()));
-			A_triplets.push_back(Triplet<double>(it.col() + gl * 2, it.row() + gl, -it.value()));
+			A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl * 2, it.value()));
+			A_triplets.push_back(Triplet<double>((long)it.col() + gl * 2, (long)it.row() + gl, -it.value()));
 		}
 	}
 	if (transiente == true)
@@ -433,8 +437,8 @@ vector<Triplet<double>> NavierStokes2D::montar_matriz_A(bool transiente, double 
 		{
 			for (SparseMatrix<double>::InnerIterator it(M, i); it; ++it)
 			{
-				A_triplets.push_back(Triplet<double>(it.row(), it.col(), it.value() / delta_t));
-				A_triplets.push_back(Triplet<double>(it.row() + gl, it.col() + gl, it.value() / delta_t));
+				A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), it.value() / delta_t));
+				A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, it.value() / delta_t));
 			}
 		}
 	}
@@ -494,13 +498,18 @@ void NavierStokes2D::aplicar_cc_B(VectorXd& B)
 	}
 }
 
-void NavierStokes2D::gerar_arquivo_saida(VectorXd& sol, unsigned long iter, double delta_t, double ni, double rho, string tag)
+void NavierStokes2D::gerar_arquivo_saida(VectorXd& sol, unsigned long iter, double delta_t, double Re, string tag)
 {
 	fstream arquivo_saida;
-	//arquivo_saida.open(malha.r_nome() + "_ni_" + to_string(ni) + "_rho_" + to_string(rho) 
-	//	+ "_dt_" + to_string(delta_t) + "_" + tag + to_string(iter) + ".vtk", ios::out);
-	arquivo_saida.open(malha.r_nome() + "_dt_" + to_string(delta_t) +"_ni_" + to_string(ni) + "_" + tag + "_" 
-		+ to_string(iter) + ".vtk", ios::out);
+
+	string Re_string = to_string(Re);
+	if(Re >= 1) Re_string = Re_string.substr(0, Re_string.size() - 7);
+	else Re_string = Re_string.substr(0, Re_string.size() - 2);
+	string dt_string = to_string(delta_t);
+	dt_string = dt_string.substr(0, dt_string.size() - 2);	
+	
+	arquivo_saida.open(malha.r_nome() + "_dt_" + dt_string +"_Re_" + Re_string
+		+ "_" + tag + "_" + to_string(iter) + ".vtk", ios::out);
 	unsigned long gl = malha.r_num_nos();
 	unsigned long vert = malha.r_num_vertices();
 
@@ -574,7 +583,7 @@ void NavierStokes2D::gerar_arquivo_saida(VectorXd& sol, unsigned long iter, doub
 
 //------ Método da Projeção ------
 
-void NavierStokes2D::resolver_navier_stokes_projecao(double delta_t, unsigned long max_iter, double ni, double rho)
+void NavierStokes2D::resolver_navier_stokes_projecao(double delta_t, unsigned long max_iter, double Re, string tag)
 {
 	system_clock::time_point total1 = system_clock::now();
 	
@@ -589,29 +598,9 @@ void NavierStokes2D::resolver_navier_stokes_projecao(double delta_t, unsigned lo
 	//B
 	SparseMatrix<double, Eigen::RowMajor> B_proj(gl * 2, gl * 2);
 	SparseMatrix<double> B_proj_col(gl * 2, gl * 2);
-	vector<Triplet<double>> B_proj_triplets = montar_matriz_B_proj(true, delta_t, ni);
+	vector<Triplet<double>> B_proj_triplets = montar_matriz_B_proj(true, delta_t, Re);
 	B_proj.setFromTriplets(B_proj_triplets.begin(), B_proj_triplets.end());
 	B_proj_col.setFromTriplets(B_proj_triplets.begin(), B_proj_triplets.end());
-	
-	////B_inversa
-	//SparseMatrix<double> B_inversa(gl * 2, gl * 2);	
-	//SparseMatrix<double> Ident(gl * 2, gl * 2);
-	//Ident.setIdentity();
-	//Eigen::SparseLU<SparseMatrix<double>> solver3;
-	//solver3.compute(B_proj_col);
-	//if (solver3.info() != EXIT_SUCCESS) cout << "Decomposicao falhou" << endl;
-	//B_inversa = solver3.solve(Ident);	
-	//SparseMatrix<double, Eigen::RowMajor> B_inversa_row(gl * 2, gl * 2);
-	//vector<Triplet<double>> B_inversa_row_triplets;
-	//for (int i = 0; i < B_inversa.outerSize(); ++i)
-	//{
-	//	for (SparseMatrix<double>::InnerIterator it(B_inversa, i); it; ++it)
-	//	{
-	//		B_inversa_row_triplets.push_back(Triplet<double>(it.row(), it.col(), it.value()));
-	//	}
-	//}
-	//B_inversa_row.setFromTriplets(B_inversa_row_triplets.begin(), B_inversa_row_triplets.end());
-	//aplicar_cc_B_proj(B_inversa_row);
 	
 	//B_lumped
 	SparseMatrix<double, Eigen::RowMajor> B_lumped_inversa(gl * 2, gl * 2);
@@ -637,36 +626,34 @@ void NavierStokes2D::resolver_navier_stokes_projecao(double delta_t, unsigned lo
 	//aplicar_cc_D_B_inv_G(D_B_inv_G);
 	t2 = system_clock::now();
 
-	//D_B_inv_G = (D * B_inversa_row * G) / rho;
-	D_B_inv_G = (D * B_lumped_inversa * G) / rho;
+	D_B_inv_G = (D * B_lumped_inversa * G);
 	D_B_inv_G = E + D_B_inv_G;
 
 	cout << "A aplicação nas matrizes B_proj, G e D levou " << duration_cast<seconds>(t2 - t1).count() << " segundos" << endl << endl;
 
-	//cout << "Iniciando o semi Lagrangiano" << endl;
-	//t1 = system_clock::now();
-	//Semi_Lagrangiano SL(malha);
-	//t2 = system_clock::now();
-	//cout << "A inicializacao do semi Lagrangiano levou " << duration_cast<seconds>(t2 - t1).count() << " segundos" << endl << endl;
+	cout << "Iniciando o semi Lagrangiano" << endl;
+	t1 = system_clock::now();
+	Semi_Lagrangiano SL(malha);
+	t2 = system_clock::now();
+	cout << "A inicializacao do semi Lagrangiano levou " << duration_cast<seconds>(t2 - t1).count() << " segundos" << endl << endl;
 
 	cout << "Iniciando processo iterativo" << endl << endl;
 	VectorXd vx(gl);
 	VectorXd vy(gl);
+	//VectorXd vx_novo(gl);
+	//VectorXd vy_novo(gl);
 	VectorXd v(gl * 2);
 	VectorXd v_til(gl * 2);
 	VectorXd p(vert);
 	VectorXd M_v(gl * 2);
-	VectorXd D_v_til(vert);	
-	VectorXd sol(gl * 2 + vert);
-	//VectorXd vx_novo(gl);
-	//VectorXd vy_novo(gl);	
 	VectorXd M_vx(gl);
 	VectorXd M_vy(gl);
+	VectorXd D_v_til(vert);
+	VectorXd sol(gl * 2 + vert);
 	v.fill(0);
 	sol.fill(0);
 	p.fill(0);
-	//M_vx.fill(0);
-	//M_vy.fill(0);
+
 	for (unsigned int i = 0; i < max_iter; i++)
 	{
 		cout << "Iteracao: " << i << endl;
@@ -674,14 +661,10 @@ void NavierStokes2D::resolver_navier_stokes_projecao(double delta_t, unsigned lo
 
 		vx = v.head(gl);
 		vy = v.segment(gl, gl);
-
-		//vx_novo = vx;
-		//vy_novo = vy;
-		//cout << "Utilizando semi lagrangiano" << endl;
-		//SL.semi_lagrangiano(malha, vx, vy, delta_t, vx_novo);
-		//SL.semi_lagrangiano(malha, vx, vy, delta_t, vy_novo);
-		//vx = vx_novo;
-		//vy = vy_novo;
+		cout << "Utilizando semi lagrangiano" << endl;
+		SL.semi_lagrangiano(malha, vx, vy, delta_t);
+		SL.multiplicar_SL(vx);
+		SL.multiplicar_SL(vy);		
 
 		M_vx = M * ((double)1 / delta_t) * vx;
 		M_vy = M * ((double)1 / delta_t) * vy;
@@ -706,13 +689,12 @@ void NavierStokes2D::resolver_navier_stokes_projecao(double delta_t, unsigned lo
 		if (solver2.info() != EXIT_SUCCESS) cout << "Decomposicao falhou" << endl;
 		p = solver2.solve(D_v_til);
 
-		v = v_til - (B_lumped_inversa * G * p) / rho;
-		//v = v_til - (B_inversa_row * G * p) / rho;
-
+		v = v_til - (B_lumped_inversa * G * p);
+		
+		//sol só é usado para gerar a saída de dados, para não ter q criar outra funcao
 		sol.head(gl*2) = v;
 		sol.segment(gl * 2, vert) = p;
-
-		gerar_arquivo_saida(sol, i, delta_t, ni, rho, "Proj_c");
+		gerar_arquivo_saida(sol, i, delta_t, Re, tag);
 		t2 = system_clock::now();
 		cout << "A iteracao " << i << " levou " << duration_cast<seconds>(t2 - t1).count() << " segundos" << endl << endl;
 	}
@@ -835,15 +817,15 @@ vector<Triplet<double>> NavierStokes2D::montar_matriz_B_lumped_inversa(SparseMat
 	return triplets;
 }
 
-vector<Triplet<double>> NavierStokes2D::montar_matriz_B_proj(bool transiente, double delta_t, double ni)
+vector<Triplet<double>> NavierStokes2D::montar_matriz_B_proj(bool transiente, double delta_t, double Re)
 {
 	vector<Triplet<double>> triplets;
 	for (int i = 0; i < K.outerSize(); ++i)
 	{
 		for (SparseMatrix<double>::InnerIterator it(K, i); it; ++it)
 		{
-			triplets.push_back(Triplet<double>(it.row(), it.col(), ni * it.value()));
-			triplets.push_back(Triplet<double>(it.row() + gl, it.col() + gl, ni * it.value()));
+			triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), it.value() / Re));
+			triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, it.value() / Re));
 		}
 	}
 	if (transiente == true)
@@ -852,8 +834,8 @@ vector<Triplet<double>> NavierStokes2D::montar_matriz_B_proj(bool transiente, do
 		{
 			for (SparseMatrix<double>::InnerIterator it(M, i); it; ++it)
 			{
-				triplets.push_back(Triplet<double>(it.row(), it.col(), it.value() / delta_t));
-				triplets.push_back(Triplet<double>(it.row() + gl, it.col() + gl, it.value() / delta_t));
+				triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), it.value() / delta_t));
+				triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, it.value() / delta_t));
 			}
 		}
 	}
@@ -948,3 +930,58 @@ void NavierStokes2D::montar_matriz_G_e_D_proj(SparseMatrix<double, Eigen::RowMaj
 //		}
 //	}
 //}
+
+void NavierStokes2D::gerar_linha_prop(int num_pontos, double xo, double yo, double x, double y)
+{
+	linha_prop_x = x;
+	linha_prop_xo = xo;
+	linha_prop_y = y;
+	linha_prop_yo = yo;
+	linha_prop_num_pontos = num_pontos;
+}
+
+void NavierStokes2D::avaliar_prop(VectorXd& prop, Semi_Lagrangiano& sl, string tag, int num_pontos, double xo, double yo, double x, double y)
+{
+	if (num_pontos == 0) return;
+	
+	fstream saida_vx;
+	fstream saida_vy;
+	fstream saida_p;
+	saida_vx.open(malha.r_nome() + " " + tag + "_vx.txt", ios::out);
+	saida_vy.open(malha.r_nome() + " " + tag + "_vy.txt", ios::out);
+	saida_p.open(malha.r_nome() + " " + tag + "_p.txt", ios::out);
+
+	double lx = (x - xo) / (num_pontos - 1);
+	double ly = (y - yo) / (num_pontos - 1);
+
+	for (unsigned int i = 0; i < num_pontos; i++)
+	{
+		double px = lx * i + xo;
+		double py = ly * i + yo;
+
+		unsigned el_index = sl.busca_linear(malha, px, py);
+		if (el_index == -1) cout << "PROBLEMA AVALIAR PROP" << endl;
+
+		Elemento elem = malha.r_elem(el_index);
+		No no1 = malha.r_no(elem.nos[0]);
+		No no2 = malha.r_no(elem.nos[1]);
+		No no3 = malha.r_no(elem.nos[2]);
+		double peso1 = ((no2.y - no3.y) * (px - no3.x) + (no3.x - no2.x) * (py - no3.y)) /
+			((no2.y - no3.y) * (no1.x - no3.x) + (no3.x - no2.x) * (no1.y - no3.y));
+		double peso2 = ((no3.y - no1.y) * (px - no3.x) + (no1.x - no3.x) * (py - no3.y)) /
+			((no2.y - no3.y) * (no1.x - no3.x) + (no3.x - no2.x) * (no1.y - no3.y));
+		double peso3 = 1 - peso1 - peso2;
+
+		double vx_x = sqrt(pow(lx * i, 2) + pow(ly * i, 2));
+		double vx_y =  prop[no1.id] * peso1 + prop[no2.id] * peso2 + prop[no3.id] * peso3;
+		saida_vx << vx_x << " " << vx_y << endl;
+
+		double vy_x = sqrt(pow(lx * i, 2) + pow(ly * i, 2));
+		double vy_y = prop[no1.id + gl] * peso1 + prop[no2.id+gl] * peso2 + prop[no3.id+gl] * peso3;
+		saida_vy << vy_x << " " << vy_y << endl;
+
+		double p_x = sqrt(pow(lx * i, 2) + pow(ly * i, 2));
+		double p_y = prop[no1.id + gl*2] * peso1 + prop[no2.id + gl*2] * peso2 + prop[no3.id + gl*2] * peso3;
+		saida_p << p_x << " " << p_y << endl;
+	}
+}

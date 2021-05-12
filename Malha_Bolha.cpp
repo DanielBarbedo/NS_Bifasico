@@ -134,9 +134,26 @@ void Malha_Bolha::atualizar_posicao(Malha& malha, Semi_Lagrangiano& sl, const Ve
 	{
 		long el_index = sl.busca_linear(malha, m_no_vec[i].x, m_no_vec[i].y);
 		if (el_index == -1) cout << "Malha_Bolha::atualizar_posicao, elemento fora do dominio" << endl;
-		double vx_ponto = sl.interpolar_Tri_Linear(malha, m_no_vec[i].x, m_no_vec[i].y, el_index, vx);
-		double vy_ponto = sl.interpolar_Tri_Linear(malha, m_no_vec[i].x, m_no_vec[i].y, el_index, vy);
+		double vx_ponto = interpolar_Tri_Linear(malha, m_no_vec[i].x, m_no_vec[i].y, el_index, vx);
+		double vy_ponto = interpolar_Tri_Linear(malha, m_no_vec[i].x, m_no_vec[i].y, el_index, vy);
 		m_no_vec[i].x += vx_ponto * dt;
 		m_no_vec[i].y += vy_ponto * dt;
 	}
+}
+
+double Malha_Bolha::interpolar_Tri_Linear(Malha& malha, double x, double y, long elem_index, const VectorXd& prop)
+{
+	Elemento elem = malha.r_elem(elem_index);
+
+	No no1 = malha.r_no(elem.nos[0]);
+	No no2 = malha.r_no(elem.nos[1]);
+	No no3 = malha.r_no(elem.nos[2]);
+
+	double peso1 = ((no2.y - no3.y) * (x - no3.x) + (no3.x - no2.x) * (y - no3.y)) /
+		((no2.y - no3.y) * (no1.x - no3.x) + (no3.x - no2.x) * (no1.y - no3.y));
+	double peso2 = ((no3.y - no1.y) * (x - no3.x) + (no1.x - no3.x) * (y - no3.y)) /
+		((no2.y - no3.y) * (no1.x - no3.x) + (no3.x - no2.x) * (no1.y - no3.y));
+	double peso3 = 1 - peso1 - peso2;
+
+	return prop[no1.id] * peso1 + prop[no2.id] * peso2 + prop[no3.id] * peso3;
 }

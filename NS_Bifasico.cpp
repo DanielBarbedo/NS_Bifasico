@@ -11,12 +11,17 @@ NS_Bifasico::NS_Bifasico(string nome, string nome_bolha)
 	vert = malha.r_num_vertices();
 
 	cout << "--- Malha lida, com " << gl << " nos e " << malha.r_num_elem() << " elementos. ---" << endl << endl;
+
+	//---Avaliacao de propriedade---
+	gerar_linha_prop(0, 0, 0, 0, 0);
 }
 
-void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter, double mi_in, double rho_in, double mi_out, double rho_out, string tag)
+void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter, double Reynolds, double mi_in, double rho_in, double mi_out, double rho_out, string tag)
 {	
 	cout << "Alocando matrizes e vetores" << endl;
-	SparseMatrix<double> K(gl, gl);
+	SparseMatrix<double> Kx(gl, gl);
+	SparseMatrix<double> Ky(gl, gl);
+	SparseMatrix<double> Kxy(gl, gl);
 	SparseMatrix<double> M(gl, gl);
 	SparseMatrix<double> Gx(gl, vert);
 	SparseMatrix<double> Gy(gl, vert);
@@ -26,8 +31,7 @@ void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter,
 	VectorXd tsx(gl);	
 	VectorXd tsy(gl);
 	VectorXd h(malha_bolha.r_num_nos());
-	VectorXd kappa_x_gl(gl);
-	VectorXd kappa_y_gl(gl);
+	VectorXd kappa_gl(gl);
 	VectorXd Gx_heavy(gl);
 	VectorXd Gy_heavy(gl);
 	VectorXd vx(gl);
@@ -52,24 +56,23 @@ void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter,
 		
 		cout << "Montando matrizes" << endl;
 		calc_heavyside_rho_mi_n(heavyside_vec, rho_vec, mi_vec, nx_vec, ny_vec, h, mi_in, rho_in, mi_out, rho_out);
-		montar_matrizes(K, M, Gx, Gy, heavyside_vec, rho_vec, mi_vec);
-		montar_matriz_A(K, M, Gx, Gy, A, delta_t, 1, 1); //------- MUDAR AQUI DEPOIS, NI E RHO PRA REYNOLDS ------
+		montar_matrizes(Kx, Ky, Kxy, M, Gx, Gy, rho_vec, mi_vec);
+		montar_matriz_A(Kx, Ky, Kxy, M, Gx, Gy, A, delta_t, Reynolds); //------- MUDAR AQUI DEPOIS, NI E RHO PRA REYNOLDS ------
 
 		cout << "Atualizando posicao da bolha" << endl;
 		malha_bolha.atualizar_posicao(malha, sl, vx, vy, delta_t);		
 
-		vx_temp = sol.head(gl);
-		vy_temp = sol.segment(gl, gl);
-		sl.semi_lagrangiano(malha, vx, vy, delta_t, vx_temp, false);
-		sl.semi_lagrangiano(malha, vx, vy, delta_t, vy_temp, false);
-		vx = vx_temp;
-		vy = vy_temp;
+		vx = sol.head(gl);
+		vy = sol.segment(gl, gl);
+		sl.semi_lagrangiano(malha, vx, vy, delta_t);
+		sl.multiplicar_SL(vx);
+		sl.multiplicar_SL(vy);
 
 		B.fill(0);
 		B.head(gl) = M * ((double)1 / delta_t) * vx;
 		B.segment(gl, gl) = M * ((double)1 / delta_t) * vy;
 
-		calc_ts(Gx, Gy, h, heavyside_vec, nx_vec, ny_vec, tsx, tsy, kappa_x_gl, kappa_y_gl, Gx_heavy, Gy_heavy);
+		calc_ts(Gx, Gy, h, heavyside_vec, nx_vec, ny_vec, tsx, tsy, kappa_gl, Gx_heavy, Gy_heavy);
 		B.head(gl) += tsx;
 		B.segment(gl, gl) += tsy;
 
@@ -84,14 +87,17 @@ void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter,
 		if (solver.info() != EXIT_SUCCESS) cout << "Decomposicao falhou" << endl;
 		sol = solver.solve(B);
 
-		gerar_arquivo_saida(sol, rho_vec, mi_vec, heavyside_vec, tsx, tsy, kappa_x_gl, kappa_y_gl, Gx_heavy,
-			Gy_heavy, i, delta_t, 1, 1, tag); //------- MUDAR AQUI DEPOIS, NI E RHO PRA REYNOLDS ------
-		//gerar_saida_bolha(i, tag);
+		gerar_arquivo_saida(sol, rho_vec, mi_vec, heavyside_vec, tsx, tsy, kappa_gl, Gx_heavy,
+			Gy_heavy, i, delta_t, Reynolds, tag); //------- MUDAR AQUI DEPOIS, NI E RHO PRA REYNOLDS ------
+		plotar_diametros(vx, vy, tag, i, delta_t);
+		gerar_saida_bolha(i, delta_t, Reynolds, tag);
 	}
+
+	avaliar_prop(sol, sl, tag, linha_prop_num_pontos, linha_prop_xo, linha_prop_yo, linha_prop_x, linha_prop_y);
 }
 
 void NS_Bifasico::calc_ts(SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, VectorXd& h, VectorXd& heavyside_vec,
-	VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& tsx, VectorXd& tsy, VectorXd& kappa_x_gl, VectorXd& kappa_y_gl,
+	VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& tsx, VectorXd& tsy, VectorXd& kappa_gl, 
 	VectorXd& Gx_heavy, VectorXd& Gy_heavy)
 {
 	long gl_bolha = malha_bolha.r_num_nos();	
@@ -160,8 +166,7 @@ void NS_Bifasico::calc_ts(SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, Ve
 			}
 		}
 
-		kappa_x_gl[j] = kappa[menor_dist_index];
-		kappa_y_gl[j] = kappa[menor_dist_index];
+		kappa_gl[j] = kappa[menor_dist_index];
 	}
 
 	Gx_heavy = Gx * heavyside_vec;
@@ -169,8 +174,8 @@ void NS_Bifasico::calc_ts(SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, Ve
 	
 	for (unsigned long i = 0; i < malha.r_num_nos(); i++)
 	{
-		tsx[i] = kappa_x_gl[i] * Gx_heavy[i];
-		tsy[i] = kappa_y_gl[i] * Gy_heavy[i];
+		tsx[i] = kappa_gl[i] * Gx_heavy[i];
+		tsy[i] = kappa_gl[i] * Gy_heavy[i];
 	}
 }
 
@@ -234,60 +239,6 @@ void NS_Bifasico::calc_heavyside_rho_mi_n(VectorXd& heavyside_vec, VectorXd& rho
 		heavyside_vec[j] = valor_heavyside;
 	}
 
-	//for (unsigned long j = 0; j < malha.r_num_vertices(); j++)
-	//{
-	//	No no_ref = malha.r_no(j);
-	//	Elemento el = malha_bolha.r_elem(0);
-
-	//	No no1 = malha_bolha.r_no(el.nos[0]);
-	//	No no2 = malha_bolha.r_no(el.nos[1]);
-	//	double x_el = (no1.x + no2.x) / 2;
-	//	double y_el = (no1.y + no2.y) / 2;
-
-	//	double dist = pow(no_ref.x - x_el, 2) + pow(no_ref.y - y_el, 2); //Como é comparação, dispensa-se a raiz
-	//	long index_menor_dist = 0;
-	//	for (unsigned int i = 1; i < malha_bolha.r_num_nos(); i++)
-	//	{
-	//		Elemento el = malha_bolha.r_elem(i);
-	//		No no1 = malha_bolha.r_no(el.nos[0]);
-	//		No no2 = malha_bolha.r_no(el.nos[1]);
-	//		double x_el = (no1.x + no2.x) / 2;
-	//		double y_el = (no1.y + no2.y) / 2;
-	//		double novo_dist = pow(no_ref.x - x_el, 2) + pow(no_ref.y - y_el, 2); //Como é comparação, dispensa-se a raiz
-	//		if (novo_dist < dist)
-	//		{
-	//			dist = novo_dist;
-	//			index_menor_dist = i;
-	//		}
-	//	}
-
-	//	el = malha_bolha.r_elem(index_menor_dist);
-	//	no1 = malha_bolha.r_no(el.nos[0]);
-	//	no2 = malha_bolha.r_no(el.nos[1]);
-
-	//	double px = (no2.x + no1.x) / 2;
-	//	double py = (no2.y + no1.y) / 2;
-	//	//Você pode adicionar depois uma checagem pro sentido de giro do círculo.
-	//	//A depender da sequência de pontos (horário ou anti-horário) os vetores dos
-	//	//elementos vão apontar pra fora ou pra dentro.
-
-	//	double v_ref_x = no_ref.x - px;
-	//	double v_ref_y = no_ref.y - py;
-
-	//	dist = sqrt(dist); //Fazemos a raiz aqui, que foi dispensada antes.
-	//	double l_interface = 0.2;
-
-	//	double escalar = v_ref_x * nx_vec[index_menor_dist] + v_ref_y * ny_vec[index_menor_dist];
-	//	if (escalar < 0) dist = -dist;
-
-	//	double valor_heavyside = 0;
-	//	if (abs(dist) <= l_interface) valor_heavyside = 1 - 0.5 
-	//		* (1 + dist / l_interface + sin(3.14159 * dist / l_interface) / 3.14159);
-	//	else if (dist < -1 * l_interface) valor_heavyside = 1;
-	//	else valor_heavyside = 0;
-	//	heavyside_vec[j] = valor_heavyside;
-	//}
-
 	for (unsigned long i = 0; i < malha.r_num_vertices(); i++)
 	{
 		rho_vec[i] = rho_in * heavyside_vec[i] + rho_out * (1 - heavyside_vec[i]);
@@ -295,12 +246,20 @@ void NS_Bifasico::calc_heavyside_rho_mi_n(VectorXd& heavyside_vec, VectorXd& rho
 	}
 }
 
-void NS_Bifasico::gerar_saida_bolha(unsigned long iter, string tag)
+void NS_Bifasico::gerar_saida_bolha(unsigned long iter, double delta_t, double Reynolds, string tag)
 {
+	if (iter % 5 != 0) return;
+
 	fstream arquivo_saida;
-	//arquivo_saida.open(malha.r_nome() + "_ni_" + to_string(ni) + "_rho_" + to_string(rho) 
-	//	+ "_dt_" + to_string(delta_t) + "_" + tag + to_string(iter) + ".vtk", ios::out);
-	arquivo_saida.open(malha.r_nome() + "_bolha_" + tag + "_" + to_string(iter) + ".vtk", ios::out);
+
+	string Re_string = to_string(Reynolds);
+	if (Reynolds >= 1) Re_string = Re_string.substr(0, Re_string.size() - 7);
+	else Re_string = Re_string.substr(0, Re_string.size() - 2);
+	string dt_string = to_string(delta_t);
+	dt_string = dt_string.substr(0, dt_string.size() - 2);
+	
+	arquivo_saida.open(malha.r_nome() + "_bolha" + "_dt_" + dt_string + "_Re_" + Re_string
+		+ "_" + tag + "_" + to_string(iter/5) + ".vtk", ios::out);
 	unsigned long gl = malha_bolha.r_num_nos();
 
 	arquivo_saida << "# vtk DataFile Version 1.0" << endl;
@@ -331,14 +290,23 @@ void NS_Bifasico::gerar_saida_bolha(unsigned long iter, string tag)
 }
 
 void NS_Bifasico::gerar_arquivo_saida(const VectorXd& sol, const VectorXd& rho_vec, const VectorXd& mi_vec,
-	const VectorXd& heavyside_vec, const VectorXd& tsx, const VectorXd& tsy, const VectorXd& kappa_x_gl, 
-	const VectorXd& kappa_y_gl, const VectorXd& Gx_heavy, const VectorXd& Gy_heavy, unsigned long iter,
-	double delta_t, double ni, double rho, string tag)
+	const VectorXd& heavyside_vec, const VectorXd& tsx, const VectorXd& tsy, const VectorXd& kappa_gl, 
+	const VectorXd& Gx_heavy, const VectorXd& Gy_heavy, unsigned long iter,
+	double delta_t, double Reynolds, string tag)
 {
+	if (iter % 5 != 0) return;
+
 	fstream arquivo_saida;
 
-	arquivo_saida.open(malha.r_nome() + "_dt_" + to_string(delta_t) + "_ni_" + to_string(ni) + "_" + tag + "_"
-		+ to_string(iter) + ".vtk", ios::out);
+	string Re_string = to_string(Reynolds);
+	if (Reynolds >= 1) Re_string = Re_string.substr(0, Re_string.size() - 7);
+	else Re_string = Re_string.substr(0, Re_string.size() - 2);
+	string dt_string = to_string(delta_t);
+	dt_string = dt_string.substr(0, dt_string.size() - 2);
+
+	arquivo_saida.open(malha.r_nome() + "_dt_" + dt_string + "_Re_" + Re_string
+		+ "_" + tag + "_" + to_string(iter/5) + ".vtk", ios::out);
+
 	unsigned long gl = malha.r_num_nos();
 	unsigned long vert = malha.r_num_vertices();
 
@@ -442,15 +410,15 @@ void NS_Bifasico::gerar_arquivo_saida(const VectorXd& sol, const VectorXd& rho_v
 	for (unsigned int i = 0; i < vert; i++) arquivo_saida << endl << Gy_heavy(i);
 	arquivo_saida << endl << endl;
 
-	arquivo_saida << "SCALARS kappa_x_gl double" << endl;
+	arquivo_saida << "SCALARS kappa_gl double" << endl;
 	arquivo_saida << "LOOKUP_TABLE default";
-	for (unsigned int i = 0; i < vert; i++) arquivo_saida << endl << kappa_x_gl(i);
+	for (unsigned int i = 0; i < vert; i++) arquivo_saida << endl << kappa_gl(i);
 	arquivo_saida << endl << endl;
 
-	arquivo_saida << "SCALARS kappa_y_gl double" << endl;
-	arquivo_saida << "LOOKUP_TABLE default";
-	for (unsigned int i = 0; i < vert; i++) arquivo_saida << endl << kappa_y_gl(i);
-	arquivo_saida << endl << endl;
+	//arquivo_saida << "SCALARS kappa_y_gl double" << endl;
+	//arquivo_saida << "LOOKUP_TABLE default";
+	//for (unsigned int i = 0; i < vert; i++) arquivo_saida << endl << kappa_y_gl(i);
+	//arquivo_saida << endl << endl;
 
 	arquivo_saida.close();
 }
@@ -508,19 +476,49 @@ void NS_Bifasico::aplicar_cc_B(VectorXd& B)
 	}
 }
 
-void NS_Bifasico::montar_matriz_A(SparseMatrix<double>& K, SparseMatrix<double>& M, SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, 
-	SparseMatrix<double, Eigen::RowMajor>& A, double delta_t, double ni, double rho)
+void NS_Bifasico::montar_matriz_A(SparseMatrix<double>& Kx, SparseMatrix<double>& Ky, 
+	SparseMatrix<double>& Kxy, SparseMatrix<double>& M, SparseMatrix<double>& Gx, 
+	SparseMatrix<double>& Gy, SparseMatrix<double, Eigen::RowMajor>& A, double delta_t, 
+	double Reynolds)
 {
 	vector<Triplet<double>> A_triplets;
-	for (int i = 0; i < K.outerSize(); ++i)
+	//for (int i = 0; i < K.outerSize(); ++i)
+	//{
+	//	for (SparseMatrix<double>::InnerIterator it(K, i); it; ++it)
+	//	{
+	//		//it.index(); // inner index, here it is equal to it.row()
+	//		A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), it.value() / Reynolds));
+	//		A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, it.value() / Reynolds));
+	//	}
+	//}
+	//K
+	for (int i = 0; i < Kx.outerSize(); ++i)
 	{
-		for (SparseMatrix<double>::InnerIterator it(K, i); it; ++it)
+		for (SparseMatrix<double>::InnerIterator it(Kx, i); it; ++it)
 		{
-			//it.index(); // inner index, here it is equal to it.row()
-			A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), ni * it.value()));
-			A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, ni * it.value()));
+			A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), 2 * it.value() / Reynolds));
+			A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, it.value() / Reynolds));
 		}
 	}
+	for (int i = 0; i < Ky.outerSize(); ++i)
+	{
+		for (SparseMatrix<double>::InnerIterator it(Ky, i); it; ++it)
+		{
+			//it.index(); // inner index, here it is equal to it.row()
+			A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col(), it.value() / Reynolds));
+			A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, 2 * it.value() / Reynolds));
+		}
+	}
+	for (int i = 0; i < Kxy.outerSize(); ++i)
+	{
+		for (SparseMatrix<double>::InnerIterator it(Kxy, i); it; ++it)
+		{
+			//it.index(); // inner index, here it is equal to it.row()
+			A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col() + gl, it.value() / Reynolds));
+			A_triplets.push_back(Triplet<double>((long)it.col() + gl, (long)it.row(), it.value() / Reynolds));
+		}
+	}
+	//M
 	for (int i = 0; i < M.outerSize(); ++i)
 	{
 		for (SparseMatrix<double>::InnerIterator it(M, i); it; ++it)
@@ -529,11 +527,12 @@ void NS_Bifasico::montar_matriz_A(SparseMatrix<double>& K, SparseMatrix<double>&
 			A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl, it.value() / delta_t));
 		}
 	}
+	//G
 	for (int i = 0; i < Gx.outerSize(); ++i)
 	{
 		for (SparseMatrix<double>::InnerIterator it(Gx, i); it; ++it)
 		{
-			A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col() + gl * 2, ((double)1 / rho) * it.value()));
+			A_triplets.push_back(Triplet<double>((long)it.row(), (long)it.col() + gl * 2, it.value()));
 			A_triplets.push_back(Triplet<double>((long)it.col() + gl * 2, (long)it.row(), -it.value()));
 		}
 	}
@@ -541,7 +540,7 @@ void NS_Bifasico::montar_matriz_A(SparseMatrix<double>& K, SparseMatrix<double>&
 	{
 		for (SparseMatrix<double>::InnerIterator it(Gy, i); it; ++it)
 		{
-			A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl * 2, ((double)1 / rho) * it.value()));
+			A_triplets.push_back(Triplet<double>((long)it.row() + gl, (long)it.col() + gl * 2, it.value()));
 			A_triplets.push_back(Triplet<double>((long)it.col() + gl * 2, (long)it.row() + gl, -it.value()));
 		}
 	}
@@ -549,10 +548,13 @@ void NS_Bifasico::montar_matriz_A(SparseMatrix<double>& K, SparseMatrix<double>&
 	A.setFromTriplets(A_triplets.begin(), A_triplets.end());
 }
 
-void NS_Bifasico::montar_matrizes(SparseMatrix<double>& K, SparseMatrix<double>& M, SparseMatrix<double>& Gx, SparseMatrix<double>& Gy,
-	VectorXd& heavyside_vec, VectorXd& rho_vec, VectorXd& mi_vec)
+void NS_Bifasico::montar_matrizes(SparseMatrix<double>& Kx, SparseMatrix<double>& Ky,
+	SparseMatrix<double>& Kxy, SparseMatrix<double>& M,	SparseMatrix<double>& Gx,
+	SparseMatrix<double>& Gy, VectorXd& rho_vec, VectorXd& mi_vec)
 {
-	vector<Triplet<double>> K_triplets;
+	vector<Triplet<double>> Kx_triplets;
+	vector<Triplet<double>> Ky_triplets;
+	vector<Triplet<double>> Kxy_triplets;
 	vector<Triplet<double>> M_triplets;
 	vector<Triplet<double>> Gx_triplets;
 	vector<Triplet<double>> Gy_triplets;
@@ -566,7 +568,7 @@ void NS_Bifasico::montar_matrizes(SparseMatrix<double>& K, SparseMatrix<double>&
 		No no4 = malha.r_no(elem.nos[3]); //No do centro
 		
 		double rho = (rho_vec[no1.id] + rho_vec[no2.id] + rho_vec[no3.id]) / 3;
-		double mi = (rho_vec[no1.id] + rho_vec[no2.id] + rho_vec[no3.id]) / 2;
+		double mi = (rho_vec[no1.id] + rho_vec[no2.id] + rho_vec[no3.id]) / 3;
 
 		//Contas Auxiliares
 		double ai = no2.x * no3.y - no3.x * no2.y;
@@ -611,29 +613,82 @@ void NS_Bifasico::montar_matrizes(SparseMatrix<double>& K, SparseMatrix<double>&
 		mat_kye_lin(2, 2) = ck * ck;
 		mat_kye_lin = mat_kye_lin / (4 * A);
 
-		Matrix3d mat_ke_lin;
-		mat_ke_lin = mat_kxe_lin + mat_kye_lin;
+		Matrix3d mat_kxye_lin;
+		mat_kxye_lin(0, 0) = bi * ci;
+		mat_kxye_lin(0, 1) = bi * cj;
+		mat_kxye_lin(0, 2) = bi * ck;
+		mat_kxye_lin(1, 0) = bj * ci;
+		mat_kxye_lin(1, 1) = bj * cj;
+		mat_kxye_lin(1, 2) = bj * ck;
+		mat_kxye_lin(2, 0) = bk * ci;
+		mat_kxye_lin(2, 1) = bk * cj;
+		mat_kxye_lin(2, 2) = bk * ck;
+		mat_kxye_lin = mat_kxye_lin / (4 * A);
 
-		MatrixXd mat_ke_mini(4, 4);
-		mat_ke_mini(0, 0) = mat_ke_lin(0, 0) + z * 9 / 10;
-		mat_ke_mini(0, 1) = mat_ke_lin(0, 1) + z * 9 / 10;
-		mat_ke_mini(0, 2) = mat_ke_lin(0, 2) + z * 9 / 10;
-		mat_ke_mini(0, 3) = z * -27 / 10;
-		mat_ke_mini(1, 0) = mat_ke_lin(1, 0) + z * 9 / 10;
-		mat_ke_mini(1, 1) = mat_ke_lin(1, 1) + z * 9 / 10;
-		mat_ke_mini(1, 2) = mat_ke_lin(1, 2) + z * 9 / 10;
-		mat_ke_mini(1, 3) = z * -27 / 10;
-		mat_ke_mini(2, 0) = mat_ke_lin(2, 0) + z * 9 / 10;
-		mat_ke_mini(2, 1) = mat_ke_lin(2, 1) + z * 9 / 10;
-		mat_ke_mini(2, 2) = mat_ke_lin(2, 2) + z * 9 / 10;
-		mat_ke_mini(2, 3) = z * -27 / 10;
-		mat_ke_mini(3, 0) = z * -27 / 10;
-		mat_ke_mini(3, 1) = z * -27 / 10;
-		mat_ke_mini(3, 2) = z * -27 / 10;
-		mat_ke_mini(3, 3) = z * 81 / 10;
+		//Matrix3d mat_ke_lin;
+		//mat_ke_lin = mat_kxe_lin + mat_kye_lin;
+
+		MatrixXd mat_kxe_mini(4, 4);
+		mat_kxe_mini(0, 0) = mat_kxe_lin(0, 0) + z * 9 / 10;
+		mat_kxe_mini(0, 1) = mat_kxe_lin(0, 1) + z * 9 / 10;
+		mat_kxe_mini(0, 2) = mat_kxe_lin(0, 2) + z * 9 / 10;
+		mat_kxe_mini(0, 3) = z * -27 / 10;
+		mat_kxe_mini(1, 0) = mat_kxe_lin(1, 0) + z * 9 / 10;
+		mat_kxe_mini(1, 1) = mat_kxe_lin(1, 1) + z * 9 / 10;
+		mat_kxe_mini(1, 2) = mat_kxe_lin(1, 2) + z * 9 / 10;
+		mat_kxe_mini(1, 3) = z * -27 / 10;
+		mat_kxe_mini(2, 0) = mat_kxe_lin(2, 0) + z * 9 / 10;
+		mat_kxe_mini(2, 1) = mat_kxe_lin(2, 1) + z * 9 / 10;
+		mat_kxe_mini(2, 2) = mat_kxe_lin(2, 2) + z * 9 / 10;
+		mat_kxe_mini(2, 3) = z * -27 / 10;
+		mat_kxe_mini(3, 0) = z * -27 / 10;
+		mat_kxe_mini(3, 1) = z * -27 / 10;
+		mat_kxe_mini(3, 2) = z * -27 / 10;
+		mat_kxe_mini(3, 3) = z * 81 / 10;
 		//------ ADICAO BIFASICO ------
-		mat_ke_mini = mat_ke_mini * mi;
+		mat_kxe_mini = mat_kxe_mini * mi;
 
+		MatrixXd mat_kye_mini(4, 4);
+		mat_kye_mini(0, 0) = mat_kye_lin(0, 0) + z * 9 / 10;
+		mat_kye_mini(0, 1) = mat_kye_lin(0, 1) + z * 9 / 10;
+		mat_kye_mini(0, 2) = mat_kye_lin(0, 2) + z * 9 / 10;
+		mat_kye_mini(0, 3) = z * -27 / 10;
+		mat_kye_mini(1, 0) = mat_kye_lin(1, 0) + z * 9 / 10;
+		mat_kye_mini(1, 1) = mat_kye_lin(1, 1) + z * 9 / 10;
+		mat_kye_mini(1, 2) = mat_kye_lin(1, 2) + z * 9 / 10;
+		mat_kye_mini(1, 3) = z * -27 / 10;
+		mat_kye_mini(2, 0) = mat_kye_lin(2, 0) + z * 9 / 10;
+		mat_kye_mini(2, 1) = mat_kye_lin(2, 1) + z * 9 / 10;
+		mat_kye_mini(2, 2) = mat_kye_lin(2, 2) + z * 9 / 10;
+		mat_kye_mini(2, 3) = z * -27 / 10;
+		mat_kye_mini(3, 0) = z * -27 / 10;
+		mat_kye_mini(3, 1) = z * -27 / 10;
+		mat_kye_mini(3, 2) = z * -27 / 10;
+		mat_kye_mini(3, 3) = z * 81 / 10;
+		//------ ADICAO BIFASICO ------
+		mat_kye_mini = mat_kye_mini * mi;
+
+		MatrixXd mat_kxye_mini(4, 4);
+		mat_kxye_mini(0, 0) = mat_kxye_lin(0, 0) + z * 9 / 10;
+		mat_kxye_mini(0, 1) = mat_kxye_lin(0, 1) + z * 9 / 10;
+		mat_kxye_mini(0, 2) = mat_kxye_lin(0, 2) + z * 9 / 10;
+		mat_kxye_mini(0, 3) = z * -27 / 10;
+		mat_kxye_mini(1, 0) = mat_kxye_lin(1, 0) + z * 9 / 10;
+		mat_kxye_mini(1, 1) = mat_kxye_lin(1, 1) + z * 9 / 10;
+		mat_kxye_mini(1, 2) = mat_kxye_lin(1, 2) + z * 9 / 10;
+		mat_kxye_mini(1, 3) = z * -27 / 10;
+		mat_kxye_mini(2, 0) = mat_kxye_lin(2, 0) + z * 9 / 10;
+		mat_kxye_mini(2, 1) = mat_kxye_lin(2, 1) + z * 9 / 10;
+		mat_kxye_mini(2, 2) = mat_kxye_lin(2, 2) + z * 9 / 10;
+		mat_kxye_mini(2, 3) = z * -27 / 10;
+		mat_kxye_mini(3, 0) = z * -27 / 10;
+		mat_kxye_mini(3, 1) = z * -27 / 10;
+		mat_kxye_mini(3, 2) = z * -27 / 10;
+		mat_kxye_mini(3, 3) = z * 81 / 10;
+		//------ ADICAO BIFASICO ------
+		mat_kxye_mini = mat_kxye_mini * mi;
+		
+		//Matrix de Massa
 		MatrixXd mat_me_mini(4, 4);
 		mat_me_mini(0, 0) = 83;
 		mat_me_mini(0, 1) = 13;
@@ -696,22 +751,56 @@ void NS_Bifasico::montar_matrizes(SparseMatrix<double>& K, SparseMatrix<double>&
 		mat_gye_mini(3, 2) = ((double)9 / 40) * ck;
 
 		//Incluindo os resultados locais nas matrizes globais
-		K_triplets.push_back(Triplet<double>(no1.id, no1.id, mat_ke_mini(0, 0)));
-		K_triplets.push_back(Triplet<double>(no1.id, no2.id, mat_ke_mini(0, 1)));
-		K_triplets.push_back(Triplet<double>(no1.id, no3.id, mat_ke_mini(0, 2)));
-		K_triplets.push_back(Triplet<double>(no1.id, no4.id, mat_ke_mini(0, 3)));
-		K_triplets.push_back(Triplet<double>(no2.id, no1.id, mat_ke_mini(1, 0)));
-		K_triplets.push_back(Triplet<double>(no2.id, no2.id, mat_ke_mini(1, 1)));
-		K_triplets.push_back(Triplet<double>(no2.id, no3.id, mat_ke_mini(1, 2)));
-		K_triplets.push_back(Triplet<double>(no2.id, no4.id, mat_ke_mini(1, 3)));
-		K_triplets.push_back(Triplet<double>(no3.id, no1.id, mat_ke_mini(2, 0)));
-		K_triplets.push_back(Triplet<double>(no3.id, no2.id, mat_ke_mini(2, 1)));
-		K_triplets.push_back(Triplet<double>(no3.id, no3.id, mat_ke_mini(2, 2)));
-		K_triplets.push_back(Triplet<double>(no3.id, no4.id, mat_ke_mini(2, 3)));
-		K_triplets.push_back(Triplet<double>(no4.id, no1.id, mat_ke_mini(3, 0)));
-		K_triplets.push_back(Triplet<double>(no4.id, no2.id, mat_ke_mini(3, 1)));
-		K_triplets.push_back(Triplet<double>(no4.id, no3.id, mat_ke_mini(3, 2)));
-		K_triplets.push_back(Triplet<double>(no4.id, no4.id, mat_ke_mini(3, 3)));
+		Kx_triplets.push_back(Triplet<double>(no1.id, no1.id, mat_kxe_mini(0, 0)));
+		Kx_triplets.push_back(Triplet<double>(no1.id, no2.id, mat_kxe_mini(0, 1)));
+		Kx_triplets.push_back(Triplet<double>(no1.id, no3.id, mat_kxe_mini(0, 2)));
+		Kx_triplets.push_back(Triplet<double>(no1.id, no4.id, mat_kxe_mini(0, 3)));
+		Kx_triplets.push_back(Triplet<double>(no2.id, no1.id, mat_kxe_mini(1, 0)));
+		Kx_triplets.push_back(Triplet<double>(no2.id, no2.id, mat_kxe_mini(1, 1)));
+		Kx_triplets.push_back(Triplet<double>(no2.id, no3.id, mat_kxe_mini(1, 2)));
+		Kx_triplets.push_back(Triplet<double>(no2.id, no4.id, mat_kxe_mini(1, 3)));
+		Kx_triplets.push_back(Triplet<double>(no3.id, no1.id, mat_kxe_mini(2, 0)));
+		Kx_triplets.push_back(Triplet<double>(no3.id, no2.id, mat_kxe_mini(2, 1)));
+		Kx_triplets.push_back(Triplet<double>(no3.id, no3.id, mat_kxe_mini(2, 2)));
+		Kx_triplets.push_back(Triplet<double>(no3.id, no4.id, mat_kxe_mini(2, 3)));
+		Kx_triplets.push_back(Triplet<double>(no4.id, no1.id, mat_kxe_mini(3, 0)));
+		Kx_triplets.push_back(Triplet<double>(no4.id, no2.id, mat_kxe_mini(3, 1)));
+		Kx_triplets.push_back(Triplet<double>(no4.id, no3.id, mat_kxe_mini(3, 2)));
+		Kx_triplets.push_back(Triplet<double>(no4.id, no4.id, mat_kxe_mini(3, 3)));
+
+		Ky_triplets.push_back(Triplet<double>(no1.id, no1.id, mat_kye_mini(0, 0)));
+		Ky_triplets.push_back(Triplet<double>(no1.id, no2.id, mat_kye_mini(0, 1)));
+		Ky_triplets.push_back(Triplet<double>(no1.id, no3.id, mat_kye_mini(0, 2)));
+		Ky_triplets.push_back(Triplet<double>(no1.id, no4.id, mat_kye_mini(0, 3)));
+		Ky_triplets.push_back(Triplet<double>(no2.id, no1.id, mat_kye_mini(1, 0)));
+		Ky_triplets.push_back(Triplet<double>(no2.id, no2.id, mat_kye_mini(1, 1)));
+		Ky_triplets.push_back(Triplet<double>(no2.id, no3.id, mat_kye_mini(1, 2)));
+		Ky_triplets.push_back(Triplet<double>(no2.id, no4.id, mat_kye_mini(1, 3)));
+		Ky_triplets.push_back(Triplet<double>(no3.id, no1.id, mat_kye_mini(2, 0)));
+		Ky_triplets.push_back(Triplet<double>(no3.id, no2.id, mat_kye_mini(2, 1)));
+		Ky_triplets.push_back(Triplet<double>(no3.id, no3.id, mat_kye_mini(2, 2)));
+		Ky_triplets.push_back(Triplet<double>(no3.id, no4.id, mat_kye_mini(2, 3)));
+		Ky_triplets.push_back(Triplet<double>(no4.id, no1.id, mat_kye_mini(3, 0)));
+		Ky_triplets.push_back(Triplet<double>(no4.id, no2.id, mat_kye_mini(3, 1)));
+		Ky_triplets.push_back(Triplet<double>(no4.id, no3.id, mat_kye_mini(3, 2)));
+		Ky_triplets.push_back(Triplet<double>(no4.id, no4.id, mat_kye_mini(3, 3)));
+
+		Kxy_triplets.push_back(Triplet<double>(no1.id, no1.id, mat_kxye_mini(0, 0)));
+		Kxy_triplets.push_back(Triplet<double>(no1.id, no2.id, mat_kxye_mini(0, 1)));
+		Kxy_triplets.push_back(Triplet<double>(no1.id, no3.id, mat_kxye_mini(0, 2)));
+		Kxy_triplets.push_back(Triplet<double>(no1.id, no4.id, mat_kxye_mini(0, 3)));
+		Kxy_triplets.push_back(Triplet<double>(no2.id, no1.id, mat_kxye_mini(1, 0)));
+		Kxy_triplets.push_back(Triplet<double>(no2.id, no2.id, mat_kxye_mini(1, 1)));
+		Kxy_triplets.push_back(Triplet<double>(no2.id, no3.id, mat_kxye_mini(1, 2)));
+		Kxy_triplets.push_back(Triplet<double>(no2.id, no4.id, mat_kxye_mini(1, 3)));
+		Kxy_triplets.push_back(Triplet<double>(no3.id, no1.id, mat_kxye_mini(2, 0)));
+		Kxy_triplets.push_back(Triplet<double>(no3.id, no2.id, mat_kxye_mini(2, 1)));
+		Kxy_triplets.push_back(Triplet<double>(no3.id, no3.id, mat_kxye_mini(2, 2)));
+		Kxy_triplets.push_back(Triplet<double>(no3.id, no4.id, mat_kxye_mini(2, 3)));
+		Kxy_triplets.push_back(Triplet<double>(no4.id, no1.id, mat_kxye_mini(3, 0)));
+		Kxy_triplets.push_back(Triplet<double>(no4.id, no2.id, mat_kxye_mini(3, 1)));
+		Kxy_triplets.push_back(Triplet<double>(no4.id, no3.id, mat_kxye_mini(3, 2)));
+		Kxy_triplets.push_back(Triplet<double>(no4.id, no4.id, mat_kxye_mini(3, 3)));
 
 		M_triplets.push_back(Triplet<double>(no1.id, no1.id, mat_me_mini(0, 0)));
 		M_triplets.push_back(Triplet<double>(no1.id, no2.id, mat_me_mini(0, 1)));
@@ -757,8 +846,121 @@ void NS_Bifasico::montar_matrizes(SparseMatrix<double>& K, SparseMatrix<double>&
 		Gy_triplets.push_back(Triplet<double>(no4.id, no3.id, mat_gye_mini(3, 2)));
 	}
 
-	K.setFromTriplets(K_triplets.begin(), K_triplets.end());
+	Kx.setFromTriplets(Kx_triplets.begin(), Kx_triplets.end());
+	Ky.setFromTriplets(Ky_triplets.begin(), Ky_triplets.end());
+	Kxy.setFromTriplets(Kxy_triplets.begin(), Kxy_triplets.end());
 	M.setFromTriplets(M_triplets.begin(), M_triplets.end());
 	Gx.setFromTriplets(Gx_triplets.begin(), Gx_triplets.end());
 	Gy.setFromTriplets(Gy_triplets.begin(), Gy_triplets.end());
+}
+
+void NS_Bifasico::plotar_diametros(const VectorXd& vx, const VectorXd& vy, string tag, unsigned long iter, double dt)
+{
+	if (iter % 5 != 0) return;
+	
+	long index_direita = 0;
+	long index_esquerda = 0;
+	long index_acima = 0;
+	long index_abaixo = 0;
+
+	No no = malha_bolha.r_no(0);
+	double x_min = no.x;
+	double x_max = no.x;
+	double y_min = no.y;
+	double y_max = no.y;
+
+	for (unsigned long i = 1; i < malha_bolha.r_num_nos(); i++)
+	{
+		No no = malha_bolha.r_no(i);
+		if (no.x < x_min)
+		{
+			index_esquerda = i;
+			x_min = no.x;
+		}
+		if (no.x > x_max)
+		{
+			index_direita = i;
+			x_max = no.x;
+		}
+		if (no.y < y_min)
+		{
+			index_abaixo = i;
+			y_min = no.y;
+		}
+		if (no.y > y_max)
+		{
+			index_acima = i;
+			y_max = no.y;
+		}
+	}
+
+	No no_esquerda = malha_bolha.r_no(index_esquerda);
+	No no_direita = malha_bolha.r_no(index_direita);
+	No no_acima = malha_bolha.r_no(index_acima);
+	No no_abaixo = malha_bolha.r_no(index_abaixo);
+
+	double dx = sqrt(pow(no_esquerda.x - no_direita.x, 2) + pow(no_esquerda.y - no_direita.y, 2));
+	double dy = sqrt(pow(no_acima.x - no_abaixo.x, 2) + pow(no_acima.y - no_abaixo.y, 2));
+
+	fstream arquivo_saida;
+
+	arquivo_saida.open(malha.r_nome() + "_diametro_" + tag + ".txt", ios::out | ios::app);
+	arquivo_saida << (dt * iter) << " " << dx << endl;
+	//arquivo_saida << (dt * iter) << " " << dy << endl;
+}
+
+//---Avaliacao de propriedades
+void NS_Bifasico::gerar_linha_prop(int num_pontos, double xo, double yo, double x, double y)
+{
+	linha_prop_x = x;
+	linha_prop_xo = xo;
+	linha_prop_y = y;
+	linha_prop_yo = yo;
+	linha_prop_num_pontos = num_pontos;
+}
+
+void NS_Bifasico::avaliar_prop(VectorXd& prop, Semi_Lagrangiano& sl, string tag, int num_pontos, double xo, double yo, double x, double y)
+{
+	if (num_pontos == 0) return;
+
+	fstream saida_vx;
+	fstream saida_vy;
+	fstream saida_p;
+	saida_vx.open(malha.r_nome() + " " + tag + "_vx.txt", ios::out);
+	saida_vy.open(malha.r_nome() + " " + tag + "_vy.txt", ios::out);
+	saida_p.open(malha.r_nome() + " " + tag + "_p.txt", ios::out);
+
+	double lx = (x - xo) / (num_pontos - 1);
+	double ly = (y - yo) / (num_pontos - 1);
+
+	for (unsigned int i = 0; i < num_pontos; i++)
+	{
+		double px = lx * i + xo;
+		double py = ly * i + yo;
+
+		unsigned el_index = sl.busca_linear(malha, px, py);
+		if (el_index == -1) cout << "PROBLEMA AVALIAR PROP" << endl;
+
+		Elemento elem = malha.r_elem(el_index);
+		No no1 = malha.r_no(elem.nos[0]);
+		No no2 = malha.r_no(elem.nos[1]);
+		No no3 = malha.r_no(elem.nos[2]);
+		double peso1 = ((no2.y - no3.y) * (px - no3.x) + (no3.x - no2.x) * (py - no3.y)) /
+			((no2.y - no3.y) * (no1.x - no3.x) + (no3.x - no2.x) * (no1.y - no3.y));
+		double peso2 = ((no3.y - no1.y) * (px - no3.x) + (no1.x - no3.x) * (py - no3.y)) /
+			((no2.y - no3.y) * (no1.x - no3.x) + (no3.x - no2.x) * (no1.y - no3.y));
+		double peso3 = 1 - peso1 - peso2;
+
+		double vx_x = sqrt(pow(lx * i, 2) + pow(ly * i, 2));
+		double vx_y = prop[no1.id] * peso1 + prop[no2.id] * peso2 + prop[no3.id] * peso3;
+		saida_vx << vx_x << " " << vx_y << endl;
+
+		double vy_x = sqrt(pow(lx * i, 2) + pow(ly * i, 2));
+		double vy_y = prop[no1.id + gl] * peso1 + prop[no2.id + gl] * peso2 + prop[no3.id + gl] * peso3;
+		saida_vy << vy_x << " " << vy_y << endl;
+
+		double p_x = sqrt(pow(lx * i, 2) + pow(ly * i, 2));
+		double p_y = prop[no1.id + gl * 2] * peso1 + prop[no2.id + gl * 2] * peso2 + prop[no3.id + gl * 2] * peso3;
+		saida_p << p_x << " " << p_y << endl;
+	}
 }

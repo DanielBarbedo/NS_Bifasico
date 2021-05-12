@@ -2,7 +2,8 @@
 
 Semi_Lagrangiano::Semi_Lagrangiano(Malha& malha)
 {
-	montar_Auxiliar(malha);
+	montar_Auxiliar(malha);	
+	mat_SL = SparseMatrix<double>(malha.r_num_nos(), malha.r_num_nos());
 	//mostrar_Auxiliar();
 }
 
@@ -31,10 +32,10 @@ void Semi_Lagrangiano::montar_Auxiliar(Malha& malha)
 		num++;
 	}
 
-	//	//Aqui construimos uma lista dos elementos opostos
-	//	//Tomamos um elemento como referência, checamos seus nós e os elementos
-	//	//opostos a estes nós. Caso o nó não tenha um elemento oposto
-	//	//(está no contorno da malha), utiliza-se o -1
+	//Aqui construimos uma lista dos elementos opostos
+	//Tomamos um elemento como referência, checamos seus nós e os elementos
+	//opostos a estes nós. Caso o nó não tenha um elemento oposto
+	//(está no contorno da malha), utiliza-se o -1
 	
 	for (unsigned int j = 0; j < malha.r_num_elem(); j++)
 	{
@@ -166,106 +167,66 @@ bool Semi_Lagrangiano::checar_oposicao(Elemento elem_ref, Elemento elem, int a, 
 	else return false;
 }
 
-void Semi_Lagrangiano::semi_lagrangiano(Malha& malha, VectorXd& vx, VectorXd& vy, 
-	double delta_t, VectorXd& prop, bool apenas_vert)
+void Semi_Lagrangiano::semi_lagrangiano(Malha& malha, VectorXd& vx, VectorXd& vy, double delta_t)
 {
 	system_clock::time_point total1 = system_clock::now();
-	contagem_busca_linear = 0;
-	duracao_busca_linear = 0;
+
+	mat_SL.setZero();
+	SL_triplets.clear();
 
 	unsigned long gl = malha.r_num_nos();
-	unsigned long vert = malha.r_num_vertices();
-	unsigned long lim = gl;
-	if (apenas_vert == true)  lim = vert;
-	VectorXd prop_novo(gl);
+	//VectorXd prop_novo(gl);
 
 	for (unsigned int i = 0; i < gl; i++)
 	{		
 		No no = malha.r_no(i);
 		double x = no.x - vx[i] * delta_t;
-		double y = no.y - vy[i] * delta_t;
-
-		//cout << "--- NO " << i + 1 << " ---" << endl;
-		//cout << "A posicao inical e: " << no.x << " " << no.y << endl;
-		//cout << "A posicao e: " << x << " " << y << endl;
-		//cout << "O vetor velocidade e: " << vx[i] << " " << vy[i] << endl;
-		
-		prop_novo[i] = achar_novo_valor(i, malha, x, y, prop);
-
-		//cout << i << " " << prop_novo[i] << endl;
-		//cout << endl;
-		//system("pause");
-
-
-		//long elem_index = busca_linear(malha, x, y);
-		//double valor = 0;
-		//if (elem_index == -1)
-		//{
-		//	unsigned long no_prox = buscar_no_prox2(malha, x, y);
-		//	valor = prop[no_prox];
-		//}
-		//else valor = interpolar_Tri_Linear(malha, x, y, elem_index, prop);
-		//prop_novo[i] = valor;
-
+		double y = no.y - vy[i] * delta_t;		
+		achar_novo_valor(i, malha, x, y);
 	}
 
-	if (apenas_vert == true)
-	{
-		for (unsigned long i = 0; i < malha.r_num_elem(); i++)
-		{
-			Elemento el = malha.r_elem(i);
-			unsigned long no3_index = el.nos[3]; //0 a 3, 4 nós
-			No no3 = malha.r_no(no3_index);
-			prop_novo[no3_index] = interpolar_Tri_Linear(malha, no3.x, no3.y, i, prop_novo);
-		}
-	}
-	
-	prop = prop_novo;
+	mat_SL.setFromTriplets(SL_triplets.begin(), SL_triplets.end());
 
-	cout << "O tempo das buscas lineares foi de " << duracao_busca_linear << endl;
+	//for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(mat_SL, it->first); it; ++it)
+	//{
+	//	cout << "Linha: " << it.row() << " Coluna: " << it.col() << " Valor: " << it.coeffRef() << endl;
+	//	
+	//}	
+
 	system_clock::time_point total2 = system_clock::now();
 	cout << "O tempo total do SL foi de " << duration_cast<milliseconds>(total2 - total1).count() << " milisegundos" << endl;
-
-	//cout << "A taxa percentual de tempo de busca linear por tempo total foi: " 
-	//	<< (duracao_busca_linear / duration_cast<milliseconds>(total2 - total1).count()) * 100 << "%" << endl;
 }
 
-double Semi_Lagrangiano::achar_novo_valor(unsigned long index, Malha& malha, double x, double y, const VectorXd& prop)
+void Semi_Lagrangiano::multiplicar_SL(VectorXd& prop)
 {
-	bool debug = false;
-	long offset = 31;
+	prop = mat_SL * prop;
+}
 
-	if (debug == true) cout << "Ponto: " << index+1 << endl;
-	//if (index == 13) system("pause");
-
-	vector<unsigned long> elems_do_no = nos_elem_vec[index];
+void Semi_Lagrangiano::achar_novo_valor(unsigned long index_origem, Malha& malha, double x, double y)
+{
+	vector<unsigned long> elems_do_no = nos_elem_vec[index_origem];
 	if (elems_do_no.empty() == true) cout << "Erro na funcao buscar elemento, vector vazio" << endl;
 
 	//Escolhemos um dos elementos ao qual o nó pertence (qualquer um serve)
-	long elem_index = elems_do_no[0];
-	long elem_index_anterior = -1;
-
-	if (debug == true) cout << "O primeiro elemento escolhido foi " << elem_index+offset << endl;
+	long index_atual = elems_do_no[0];
+	long index_anterior = -1;
 
 	//Checamos se o nó caiu dentro do primeiro elemento que escolhemos
-	bool dentro = checar_ponto_dentro_elem(elem_index, x, y, malha);
-
-	if (dentro == true)
+	if (checar_ponto_dentro_elem(index_atual, x, y, malha))
 	{
-		if (debug == true) cout << "O ponto estava dentro do primeiro elemento testado" << endl;
-		return interpolar_Tri_Linear(malha, x, y, elem_index, prop);
+		interpolar_Tri_Linear(malha, x, y, index_atual, index_origem);
+		return;
 	}
 	
-	if (debug == true) cout << "O ponto --- NAO --- estava dentro do primeiro elemento testado, iniciando busca" << endl;
-
 	//Se não, procuramos o próximo elemento
 	while (true)
 	{
 		//Pegamos a lista de elementos opostos ao elemento escolhido
-		vector<Elem_Oposto> elem_op = elem_opostos[elem_index];
+		vector<Elem_Oposto> elem_op = elem_opostos[index_atual];
 
 		//Aqui checamos qual elemento da lista de elementos
 		//opostos é o mais distante do nó de partida
+		//---
 		No no = malha.r_no(elem_op[0].no);
 		long elem_oposto = elem_op[0].elem;
 		double dist_ref = pow(x - no.x, 2) + pow(y - no.y, 2);
@@ -280,40 +241,50 @@ double Semi_Lagrangiano::achar_novo_valor(unsigned long index, Malha& malha, dou
 				elem_oposto = elem_op[i].elem;
 			}
 		}
+		//---
 
-		if (elem_oposto == -1)
+		if (elem_oposto == -1) //Caimos fora do domínio. Faz-se uma interpolação no contorno
 		{			
-			No no_a = malha.r_no(index);
-			double valor = interpolar_contorno(malha, elem_index, no_a.x, no_a.y, x, y, prop);
-			if (debug == true) cout << "A interpolacao no contorno retornou " << valor << endl;
-			return valor;
+			No no_a = malha.r_no(index_origem);
+			interpolar_contorno(malha, index_atual, index_origem, no_a.x, no_a.y, x, y);
+			return;
 		}
-		if (checar_ponto_dentro_elem(elem_oposto, x, y, malha) == true)
+		if (checar_ponto_dentro_elem(elem_oposto, x, y, malha) == true) //O ponto está dentro do elemento
 		{
-			if (debug == true) cout << "Retornando elemento de index " << elem_oposto+offset << endl;
-			return interpolar_Tri_Linear(malha, x, y, elem_oposto, prop);
+			interpolar_Tri_Linear(malha, x, y, elem_oposto, index_origem);
+			return;
 		}
-		if (elem_oposto == elem_index_anterior)
+		if (elem_oposto == index_anterior) //O elemento encontrado é anterior
 		{
-			double novo_index = busca_linear(malha, x, y);
-			if (debug == true) cout << "Busca linear retornou elemento " << elem_index+offset << endl;
-			if (novo_index != -1) return interpolar_Tri_Linear(malha, x, y, novo_index, prop);
-			else return interpolar_Tri_Linear(malha, x, y, elem_index, prop);
+			long novo_index = busca_linear(malha, x, y);
+			if (novo_index != -1)
+			{
+				interpolar_Tri_Linear(malha, x, y, novo_index, index_origem);
+				return;
+			}
+			else
+			{
+				interpolar_Tri_Linear(malha, x, y, index_atual, index_origem);
+				return;
+			}
 		}
 		else
 		{
-			elem_index_anterior = elem_index;
-			elem_index = elem_oposto;
-			if (debug == true) cout << "novo index " << elem_index+ offset << endl;
+			index_anterior = index_atual;
+			index_atual = elem_oposto;
 		}
 	}
 }
 
-double Semi_Lagrangiano::interpolar_contorno(Malha& malha, unsigned long elem_index, double xo, double yo, double x, double y, const VectorXd& prop)
+void Semi_Lagrangiano::interpolar_contorno(Malha& malha, long index_atual, long index_origem, double xo, double yo,
+	double x, double y)
 {	
-	vector<Elem_Oposto> elem_op = elem_opostos[elem_index];
+	//Esta é a lista de elementos opostos aos vértices de index_origem
+	vector<Elem_Oposto> elem_op = elem_opostos[index_atual];
 	if (elem_op.size() != 3) cout << "PROBLEMA INTERPOLAR CONTORNO, ELEM_OP.SIZE != 3" << endl;
 
+	//no_index_vec é preenchido com os vértices que não tem -1 como oposto,
+	//ou seja, os vértices que fazem parte do contorno da malha
 	vector<long> no_index_vec;
 	for (int i = 0; i < elem_op.size(); i++) if (elem_op[i].elem != -1) no_index_vec.push_back(elem_op[i].no);
 	if (no_index_vec.size() != 2) cout << "PROBLEMA INTERPOLAR CONTORNO, no_index_vec.size() != 2" << endl;
@@ -322,8 +293,6 @@ double Semi_Lagrangiano::interpolar_contorno(Malha& malha, unsigned long elem_in
 	No b = malha.r_no(no_index_vec[1]);
 	
 	double d = (xo - x) * (a.y - b.y) - (yo - y) * (a.x - b.x);
-
-	//if (d == 0)	cout << "PROBLEMA INTERPOLAR, D = 0" << endl;
 	double px = ((xo * y - yo * x) * (a.x - b.x) - (xo - x) * (a.x * b.y - a.y * b.x)) / d;
 	double py = ((xo * y - yo * x) * (a.y - b.y) - (yo - y) * (a.x * b.y - a.y * b.x)) / d;
 
@@ -332,47 +301,36 @@ double Semi_Lagrangiano::interpolar_contorno(Malha& malha, unsigned long elem_in
 
 	double peso_a = Lpb / Lab;
 	double peso_b = 1 - peso_a;
-
-	if (peso_a < 0) peso_a = 0;
-	if (peso_b < 0) peso_b = 0;
-	if (peso_a > 1) peso_a = 1;
-	if (peso_b > 1) peso_b = 1;
-
-	if (peso_a > 1 || peso_a < 0 || peso_b > 1 || peso_b < 0)
+	
+	if (isnan(peso_a) || isnan(peso_b))
 	{
-		cout << "PROBLEMA INTERPOLAR CONTORNO, pesos incoerentes" << endl;
+		double dist_a = pow(x - a.x, 2) + pow(y - a.y, 2);
+		double dist_b = pow(x - b.x, 2) + pow(y - b.y, 2);
+		if (dist_a < dist_b)
+		{
+			peso_a = 1;
+			peso_b = 0;
+		}
+		else
+		{
+			peso_a = 0;
+			peso_b = 1;
+		}
 	}
-
-	double valor = prop[a.id] * peso_a + prop[b.id] * peso_b;
-	if (isnan(valor) || d == 0) valor = prop[buscar_no_prox2(malha, x, y)];
-	return valor;
 	
+	if (peso_a < 0)
+	{
+		peso_a = 0;
+		peso_b = 1;
+	}
+	else if (peso_a > 1)
+	{
+		peso_a = 1;
+		peso_b = 0;
+	}
 	
-	////Esta função pode ser melhorada depois. Por hora, vou só buscar o ponto mais
-	////próximo, mas tem como achar o elemento, achar a intersecção e fazer a inter-
-	////polação apropriada
-
-	//Elemento el = malha.r_elem(elem_index);	
-	//No no = malha.r_no(el.nos[0]);
-	//unsigned long no_mais_prox = no.id;
-
-	//double dist, dist_ref;
-	//dist_ref = pow(x - no.x, 2) + pow(y - no.y, 2);
-
-	//for (unsigned int i = 1; i < el.nos.size(); i++)
-	//{
-	//	No no = malha.r_no(el.nos[i]);
-	//	//Como é apenas pra comparação, e não há interesse em achar o valor
-	//	//real da distância, pulei o cálculo da raiz, que tem custo computacional
-	//	dist = pow(x - no.x, 2) + pow(y - no.y, 2);
-
-	//	if (dist < dist_ref)
-	//	{
-	//		dist_ref = dist;
-	//		no_mais_prox = no.id;
-	//	}
-	//}
-	//return no_mais_prox;
+	SL_triplets.push_back(Triplet<double>(index_origem, a.id, peso_a));
+	SL_triplets.push_back(Triplet<double>(index_origem, b.id, peso_b));
 }
 
 long Semi_Lagrangiano::busca_linear(Malha& malha, double x, double y)
@@ -394,10 +352,9 @@ double Semi_Lagrangiano::area_triangulo(double x1, double y1, double x2, double 
 	return A;
 }
 
-double Semi_Lagrangiano::interpolar_Tri_Linear(Malha& malha, double x, double y,
-	long elem_index, const VectorXd& prop)
+void Semi_Lagrangiano::interpolar_Tri_Linear(Malha& malha, double x, double y, long index_atual, long index_origem)
 {
-	Elemento elem = malha.r_elem(elem_index);
+	Elemento elem = malha.r_elem(index_atual);
 
 	No no1 = malha.r_no(elem.nos[0]);
 	No no2 = malha.r_no(elem.nos[1]);
@@ -409,7 +366,11 @@ double Semi_Lagrangiano::interpolar_Tri_Linear(Malha& malha, double x, double y,
 		((no2.y - no3.y) * (no1.x - no3.x) + (no3.x - no2.x) * (no1.y - no3.y));
 	double peso3 = 1 - peso1 - peso2;
 
-	return prop[no1.id] * peso1 + prop[no2.id] * peso2 + prop[no3.id] * peso3;
+	//return prop[no1.id] * peso1 + prop[no2.id] * peso2 + prop[no3.id] * peso3;
+
+	SL_triplets.push_back(Triplet<double>(index_origem, no1.id, peso1));
+	SL_triplets.push_back(Triplet<double>(index_origem, no2.id, peso2));
+	SL_triplets.push_back(Triplet<double>(index_origem, no3.id, peso3));
 }
 
 bool Semi_Lagrangiano::checar_ponto_dentro_elem(unsigned long elem_index, double x, double y, Malha& malha)
@@ -442,33 +403,33 @@ bool Semi_Lagrangiano::checar_ponto_dentro_elem(unsigned long elem_index, double
 }
 
 //TEMPORARIO para testes
-unsigned long Semi_Lagrangiano::buscar_no_prox2(Malha& malha, double x, double y)
-{
-	//Esta função pode ser melhorada depois. Por hora, vou só buscar o ponto mais
-	//próximo, mas tem como achar o elemento, achar a intersecção e fazer a inter-
-	//polação apropriada
-
-	vector<unsigned long> nos_contorno = malha.r_no_contorno();
-
-	double dist, dist_ref;
-	unsigned long no_prox = nos_contorno[0];
-
-	No no = malha.r_no(nos_contorno[0]);
-	dist_ref = pow(x - no.x, 2) + pow(y - no.y, 2);
-
-	for (unsigned int i = 1; i < nos_contorno.size(); i++)
-	{
-		No no = malha.r_no(nos_contorno[i]);
-
-		//Como é apenas pra comparação, e não há interesse em achar o valor
-		//real da distância, pulei o cálculo da raiz, que tem custo computacional
-		dist = pow(x - no.x, 2) + pow(y - no.y, 2);
-
-		if (dist < dist_ref)
-		{
-			dist_ref = dist;
-			no_prox = nos_contorno[i];
-		}
-	}
-	return no_prox;
-}
+//unsigned long Semi_Lagrangiano::buscar_no_prox2(Malha& malha, double x, double y)
+//{
+//	//Esta função pode ser melhorada depois. Por hora, vou só buscar o ponto mais
+//	//próximo, mas tem como achar o elemento, achar a intersecção e fazer a inter-
+//	//polação apropriada
+//
+//	vector<unsigned long> nos_contorno = malha.r_no_contorno();
+//
+//	double dist, dist_ref;
+//	unsigned long no_prox = nos_contorno[0];
+//
+//	No no = malha.r_no(nos_contorno[0]);
+//	dist_ref = pow(x - no.x, 2) + pow(y - no.y, 2);
+//
+//	for (unsigned int i = 1; i < nos_contorno.size(); i++)
+//	{
+//		No no = malha.r_no(nos_contorno[i]);
+//
+//		//Como é apenas pra comparação, e não há interesse em achar o valor
+//		//real da distância, pulei o cálculo da raiz, que tem custo computacional
+//		dist = pow(x - no.x, 2) + pow(y - no.y, 2);
+//
+//		if (dist < dist_ref)
+//		{
+//			dist_ref = dist;
+//			no_prox = nos_contorno[i];
+//		}
+//	}
+//	return no_prox;
+//}
