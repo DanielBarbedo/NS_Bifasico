@@ -42,6 +42,9 @@ void Malha_Bolha::ler_nos(ifstream& arquivo)
 
 		m_no_vec.push_back(no);
 	}
+
+	dist_inicial_entre_nos = sqrt(pow(m_no_vec[0].x - m_no_vec[1].x, 2) +
+		pow(m_no_vec[0].y - m_no_vec[1].y, 2) + pow(m_no_vec[0].z - m_no_vec[1].z, 2));
 }
 
 void Malha_Bolha::ler_elementos(ifstream& arquivo)
@@ -139,6 +142,50 @@ void Malha_Bolha::atualizar_posicao(Malha& malha, Semi_Lagrangiano& sl, const Ve
 		m_no_vec[i].x += vx_ponto * dt;
 		m_no_vec[i].y += vy_ponto * dt;
 	}
+}
+
+void Malha_Bolha::remalhar()
+{
+	vector<No> no_vec_novo;
+
+	for (unsigned int i = 0; i < m_elem_vec.size(); i++)
+	{
+		No no1 = m_no_vec[m_elem_vec[i].nos[0]];
+		No no2 = m_no_vec[m_elem_vec[i].nos[1]];
+
+		no_vec_novo.push_back(no1);
+
+		double dist = sqrt(pow(no1.x - no2.x, 2) + pow(no1.y - no2.y, 2) + pow(no1.z - no2.z, 2));
+		if ( dist < 0.85 * dist_inicial_entre_nos)
+		{
+			i++;
+		}
+		else if (dist > 1.15 * dist_inicial_entre_nos)
+		{
+			No no_inter;
+			no_inter.x = (no1.x + no2.x) / 2;
+			no_inter.y = (no1.y + no2.y) / 2;
+			no_inter.z = (no1.z + no2.z) / 2;
+			no_vec_novo.push_back(no_inter);
+		}
+	}
+
+	m_elem_vec.clear();
+
+	for (int i = 0; i < no_vec_novo.size(); i++)
+	{
+		no_vec_novo[i].id = i;
+
+		Elemento el;
+		el.tipo = Tipo_Elem::Linha;
+		el.nos.push_back(i);
+		el.nos.push_back(i+1);
+
+		m_elem_vec.push_back(el);
+	}
+
+	m_elem_vec.back().nos[1] = 0;
+	m_no_vec = no_vec_novo;
 }
 
 double Malha_Bolha::interpolar_Tri_Linear(Malha& malha, double x, double y, long elem_index, const VectorXd& prop)

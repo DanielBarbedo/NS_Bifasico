@@ -29,6 +29,8 @@ public:
 
 	//Avaliação de propriedade em uma linha qualquer
 	void gerar_linha_prop(int num_pontos, double xo, double yo, double x, double y);
+	//---Geração de arquivos de saída---
+	void alterar_numero_arquivos_saida(int num) { max_saida = num; }
 
 
 private:
@@ -39,10 +41,6 @@ private:
 	void aplicar_cc_B(VectorXd& B);
 	void gerar_arquivo_saida(VectorXd& B, unsigned long iter, double delta_t, double Re, string tag);
 
-	//Avaliação de propriedade em uma linha qualquer
-	void avaliar_prop(VectorXd& prop, Semi_Lagrangiano& sl, string tag, int num_pontos, double xo, double yo, double x, double y);
-	
-	
 	//CC linha e coluna
 	void aplicar_cc_linha_e_coluna(SparseMatrix<double, Eigen::RowMajor>& A);
 
@@ -67,7 +65,12 @@ private:
 	SparseMatrix<double> Gx;
 	SparseMatrix<double> Gy;
 
+	//Avaliação de propriedade em uma linha qualquer
+	void avaliar_prop(VectorXd& prop, Semi_Lagrangiano& sl, string tag, int num_pontos, double xo, double yo, double x, double y);
 	//---Avaliação de propriedade---
 	double linha_prop_x, linha_prop_xo, linha_prop_y, linha_prop_yo;
 	int linha_prop_num_pontos;
+	//---Geração de arquivos de saída---
+	int max_saida;
+	int iteracoes_por_saida;
 };

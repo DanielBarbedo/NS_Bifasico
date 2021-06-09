@@ -14,10 +14,16 @@ NS_Bifasico::NS_Bifasico(string nome, string nome_bolha)
 
 	//---Avaliacao de propriedade---
 	gerar_linha_prop(0, 0, 0, 0, 0);
+	//---Geração de arquivos de saída
+	max_saida = 400;
+	iteracoes_por_saida = 1;
 }
 
-void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter, double Reynolds, double mi_in, double rho_in, double mi_out, double rho_out, string tag)
+void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter, double Reynolds, double Weber, double mi_in, double rho_in, double mi_out, double rho_out, double l_interface, string tag)
 {	
+	iteracoes_por_saida = max_iter / max_saida;
+	if (iteracoes_por_saida < 1) iteracoes_por_saida = 1;
+	
 	cout << "Alocando matrizes e vetores" << endl;
 	SparseMatrix<double> Kx(gl, gl);
 	SparseMatrix<double> Ky(gl, gl);
@@ -38,9 +44,10 @@ void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter,
 	VectorXd vy(gl);
 	VectorXd vx_temp(gl);
 	VectorXd vy_temp(gl);
+	VectorXd g_vec(gl);
 	VectorXd nx_vec(malha_bolha.r_num_elem());
 	VectorXd ny_vec(malha_bolha.r_num_elem());
-	VectorXd rho_vec(vert);
+	VectorXd rho_vec(vert);	
 	VectorXd mi_vec(vert);
 	VectorXd heavyside_vec(vert);
 	vx.fill(0);
@@ -52,15 +59,18 @@ void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter,
 
 	for (unsigned int i = 0; i < max_iter; i++)
 	{
+		system_clock::time_point total1 = system_clock::now();
+
 		cout << endl << "ITERACAO: " << i << endl << endl;
 		
 		cout << "Montando matrizes" << endl;
-		calc_heavyside_rho_mi_n(heavyside_vec, rho_vec, mi_vec, nx_vec, ny_vec, h, mi_in, rho_in, mi_out, rho_out);
+		calc_heavyside_rho_mi_n(heavyside_vec, rho_vec, mi_vec, nx_vec, ny_vec, h, mi_in, rho_in, mi_out, rho_out, l_interface);
 		montar_matrizes(Kx, Ky, Kxy, M, Gx, Gy, rho_vec, mi_vec);
-		montar_matriz_A(Kx, Ky, Kxy, M, Gx, Gy, A, delta_t, Reynolds); //------- MUDAR AQUI DEPOIS, NI E RHO PRA REYNOLDS ------
+		montar_matriz_A(Kx, Ky, Kxy, M, Gx, Gy, A, delta_t, Reynolds);
 
 		cout << "Atualizando posicao da bolha" << endl;
-		malha_bolha.atualizar_posicao(malha, sl, vx, vy, delta_t);		
+		malha_bolha.atualizar_posicao(malha, sl, vx, vy, delta_t);
+		malha_bolha.remalhar();
 
 		vx = sol.head(gl);
 		vy = sol.segment(gl, gl);
@@ -72,9 +82,11 @@ void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter,
 		B.head(gl) = M * ((double)1 / delta_t) * vx;
 		B.segment(gl, gl) = M * ((double)1 / delta_t) * vy;
 
-		calc_ts(Gx, Gy, h, heavyside_vec, nx_vec, ny_vec, tsx, tsy, kappa_gl, Gx_heavy, Gy_heavy);
+		calc_ts(Weber, Gx, Gy, h, heavyside_vec, nx_vec, ny_vec, tsx, tsy, kappa_gl, Gx_heavy, Gy_heavy);
+		calc_g(M, rho_vec, g_vec);
 		B.head(gl) += tsx;
 		B.segment(gl, gl) += tsy;
+		B.segment(gl, gl) += g_vec; //Aqui só está atendendo os nós do vértice, precisa ter nos nós centrais tb
 
 		cout << "Aplicando ccs" << endl;
 		aplicar_cc_A(A);
@@ -91,13 +103,34 @@ void NS_Bifasico::resolver_navier_stokes(double delta_t, unsigned long max_iter,
 			Gy_heavy, i, delta_t, Reynolds, tag); //------- MUDAR AQUI DEPOIS, NI E RHO PRA REYNOLDS ------
 		plotar_diametros(vx, vy, tag, i, delta_t);
 		gerar_saida_bolha(i, delta_t, Reynolds, tag);
+
+		system_clock::time_point total2 = system_clock::now();
+		cout << "O tempo total da iteracao foi de " << duration_cast<seconds>(total2 - total1).count() << " segundos" << endl;
 	}
 
 	avaliar_prop(sol, sl, tag, linha_prop_num_pontos, linha_prop_xo, linha_prop_yo, linha_prop_x, linha_prop_y);
 }
 
-void NS_Bifasico::calc_ts(SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, VectorXd& h, VectorXd& heavyside_vec,
-	VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& tsx, VectorXd& tsy, VectorXd& kappa_gl, 
+void NS_Bifasico::calc_g(const MatrixXd& M, const VectorXd& rho_vec, VectorXd& g_vec)
+{
+	VectorXd rho_vec_temp(gl);	
+	rho_vec_temp.head(vert) = rho_vec;
+	
+	for (unsigned int i = 0; i < malha.r_num_elem(); i++)
+	{
+		Elemento el = malha.r_elem(i);
+		No no1 = malha.r_no(el.nos[0]);
+		No no2 = malha.r_no(el.nos[1]);
+		No no3 = malha.r_no(el.nos[2]);
+		
+		rho_vec_temp[vert+i] = (rho_vec[no1.id] + rho_vec[no2.id] + rho_vec[no3.id]) / 3;
+	}
+
+	g_vec = -1 * M * rho_vec_temp;	
+}
+
+void NS_Bifasico::calc_ts(double Weber, SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, VectorXd& h,
+	VectorXd& heavyside_vec, VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& tsx, VectorXd& tsy, VectorXd& kappa_gl, 
 	VectorXd& Gx_heavy, VectorXd& Gy_heavy)
 {
 	long gl_bolha = malha_bolha.r_num_nos();	
@@ -174,13 +207,14 @@ void NS_Bifasico::calc_ts(SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, Ve
 	
 	for (unsigned long i = 0; i < malha.r_num_nos(); i++)
 	{
-		tsx[i] = kappa_gl[i] * Gx_heavy[i];
-		tsy[i] = kappa_gl[i] * Gy_heavy[i];
+		tsx[i] = kappa_gl[i] * Gx_heavy[i] / Weber;
+		tsy[i] = kappa_gl[i] * Gy_heavy[i] / Weber;
 	}
 }
 
 void NS_Bifasico::calc_heavyside_rho_mi_n(VectorXd& heavyside_vec, VectorXd& rho_vec, VectorXd& mi_vec, 
-	VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& h, double mi_in, double rho_in, double mi_out, double rho_out)
+	VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& h, double mi_in, double rho_in, double mi_out, double rho_out,
+	double l_interface)
 {
 	nx_vec.fill(0);
 	ny_vec.fill(0);
@@ -225,8 +259,7 @@ void NS_Bifasico::calc_heavyside_rho_mi_n(VectorXd& heavyside_vec, VectorXd& rho
 		double v_ref_x = no_ref.x - no_bolha.x;
 		double v_ref_y = no_ref.y - no_bolha.y;
 
-		dist = sqrt(dist); //Fazemos a raiz aqui, que foi dispensada antes.
-		double l_interface = 0.2;
+		dist = sqrt(dist); //Fazemos a raiz aqui, que foi dispensada antes.		
 
 		double escalar = v_ref_x * nx_vec[index_menor_dist] + v_ref_y * ny_vec[index_menor_dist];
 		if (escalar < 0) dist = -dist;
@@ -248,7 +281,7 @@ void NS_Bifasico::calc_heavyside_rho_mi_n(VectorXd& heavyside_vec, VectorXd& rho
 
 void NS_Bifasico::gerar_saida_bolha(unsigned long iter, double delta_t, double Reynolds, string tag)
 {
-	if (iter % 5 != 0) return;
+	if (iter % iteracoes_por_saida != 0) return;
 
 	fstream arquivo_saida;
 
@@ -259,7 +292,7 @@ void NS_Bifasico::gerar_saida_bolha(unsigned long iter, double delta_t, double R
 	dt_string = dt_string.substr(0, dt_string.size() - 2);
 	
 	arquivo_saida.open(malha.r_nome() + "_bolha" + "_dt_" + dt_string + "_Re_" + Re_string
-		+ "_" + tag + "_" + to_string(iter/5) + ".vtk", ios::out);
+		+ "_" + tag + "_" + to_string(iter) + ".vtk", ios::out);
 	unsigned long gl = malha_bolha.r_num_nos();
 
 	arquivo_saida << "# vtk DataFile Version 1.0" << endl;
@@ -294,7 +327,7 @@ void NS_Bifasico::gerar_arquivo_saida(const VectorXd& sol, const VectorXd& rho_v
 	const VectorXd& Gx_heavy, const VectorXd& Gy_heavy, unsigned long iter,
 	double delta_t, double Reynolds, string tag)
 {
-	if (iter % 5 != 0) return;
+	if (iter % iteracoes_por_saida != 0) return;
 
 	fstream arquivo_saida;
 
@@ -305,7 +338,7 @@ void NS_Bifasico::gerar_arquivo_saida(const VectorXd& sol, const VectorXd& rho_v
 	dt_string = dt_string.substr(0, dt_string.size() - 2);
 
 	arquivo_saida.open(malha.r_nome() + "_dt_" + dt_string + "_Re_" + Re_string
-		+ "_" + tag + "_" + to_string(iter/5) + ".vtk", ios::out);
+		+ "_" + tag + "_" + to_string(iter) + ".vtk", ios::out);
 
 	unsigned long gl = malha.r_num_nos();
 	unsigned long vert = malha.r_num_vertices();
@@ -426,34 +459,34 @@ void NS_Bifasico::gerar_arquivo_saida(const VectorXd& sol, const VectorXd& rho_v
 void NS_Bifasico::aplicar_cc_A(SparseMatrix<double, Eigen::RowMajor>& A)
 {
 	unordered_map<unsigned long, double> cc_vx_map = malha.r_cc_vx();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vx_map.begin(); it != cc_vx_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vx_map.begin(); it_map != cc_vx_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it->first); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it_map->first); it; ++it)
 		{
 			//it.valueRef() = 0;
 			A.coeffRef(it.row(), it.col()) = 0;
 		}
-		A.coeffRef(it->first, it->first) = 1;
+		A.coeffRef(it_map->first, it_map->first) = 1;
 	}
 	unordered_map<unsigned long, double> cc_vy_map = malha.r_cc_vy();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vy_map.begin(); it != cc_vy_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vy_map.begin(); it_map != cc_vy_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it->first + gl); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it_map->first + gl); it; ++it)
 		{
 			//it.valueRef() = 0;
 			A.coeffRef(it.row(), it.col()) = 0;
 		}
-		A.coeffRef(it->first + gl, it->first + gl) = 1;
+		A.coeffRef(it_map->first + gl, it_map->first + gl) = 1;
 	}
 	unordered_map<unsigned long, double> cc_p_map = malha.r_cc_p();
-	for (unordered_map<unsigned long, double>::iterator it = cc_p_map.begin(); it != cc_p_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_p_map.begin(); it_map != cc_p_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it->first + gl * 2); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it_map->first + gl * 2); it; ++it)
 		{
 			//it.valueRef() = 0;
 			A.coeffRef(it.row(), it.col()) = 0;
 		}
-		A.coeffRef(it->first + gl * 2, it->first + gl * 2) = 1;
+		A.coeffRef(it_map->first + gl * 2, it_map->first + gl * 2) = 1;
 	}
 }
 
@@ -856,7 +889,7 @@ void NS_Bifasico::montar_matrizes(SparseMatrix<double>& Kx, SparseMatrix<double>
 
 void NS_Bifasico::plotar_diametros(const VectorXd& vx, const VectorXd& vy, string tag, unsigned long iter, double dt)
 {
-	if (iter % 5 != 0) return;
+	if (iter % iteracoes_por_saida != 0) return;
 	
 	long index_direita = 0;
 	long index_esquerda = 0;

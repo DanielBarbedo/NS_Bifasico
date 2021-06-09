@@ -8,16 +8,19 @@ class NS_Bifasico
 public:
 
 	NS_Bifasico(string nome, string nome_bolha);
-	void resolver_navier_stokes(double delta_t, unsigned long max_iter, double Reynolds, double mi_in, double rho_in, double mi_out, double rho_out, string tag);
+	void resolver_navier_stokes(double delta_t, unsigned long max_iter, double Reynolds, double Weber, double mi_in, double rho_in, double mi_out, double rho_out, double l_interface, string tag);
 
 	//Avaliação de propriedade em uma linha qualquer
 	void gerar_linha_prop(int num_pontos, double xo, double yo, double x, double y);
+	//---Geração de arquivos de saída---
+	void alterar_numero_arquivos_saida(int num) { max_saida = num; }
 
 private:
 
 	//friend void NavierStokes2D::montar_matrizes_fixas(SparseMatrix<double>& K, SparseMatrix<double>& M, SparseMatrix<double>& Gx, SparseMatrix<double>& Gy);
-	void calc_ts(SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, VectorXd& h, VectorXd& heavyside_vec, VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& tsx, VectorXd& tsy, VectorXd& kappa_gl, VectorXd& Gx_heavy, VectorXd& Gy_heavy);
-	void calc_heavyside_rho_mi_n(VectorXd& heavyside_vec, VectorXd& rho_vec, VectorXd& mi_vec, VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& h, double mi_in, double rho_in, double mi_out, double rho_out);
+	void calc_ts(double Weber, SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, VectorXd& h, VectorXd& heavyside_vec, VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& tsx, VectorXd& tsy, VectorXd& kappa_gl, VectorXd& Gx_heavy, VectorXd& Gy_heavy);
+	void calc_g(const MatrixXd& M, const VectorXd& rho_vec, VectorXd& g_vec);
+	void calc_heavyside_rho_mi_n(VectorXd& heavyside_vec, VectorXd& rho_vec, VectorXd& mi_vec, VectorXd& nx_vec, VectorXd& ny_vec, VectorXd& h, double mi_in, double rho_in, double mi_out, double rho_out, double l_interface);
 	void montar_matrizes(SparseMatrix<double>& Kx, SparseMatrix<double>& Ky, SparseMatrix<double>& Kxy, SparseMatrix<double>& M, SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, VectorXd& rho_vec, VectorXd& mi_vec);
 	void montar_matriz_A(SparseMatrix<double>& Kx, SparseMatrix<double>& Ky, SparseMatrix<double>& Kxy, SparseMatrix<double>& M, SparseMatrix<double>& Gx, SparseMatrix<double>& Gy, SparseMatrix<double, Eigen::RowMajor>& A, double delta_t, double Reynolds);
 	void aplicar_cc_A(SparseMatrix<double, Eigen::RowMajor>& A);
@@ -38,4 +41,8 @@ private:
 	//---Avaliação de propriedade---
 	double linha_prop_x, linha_prop_xo, linha_prop_y, linha_prop_yo;
 	int linha_prop_num_pontos;
+
+	//---Geração de arquivos de saída---
+	int max_saida;
+	int iteracoes_por_saida;
 };

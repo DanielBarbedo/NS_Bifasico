@@ -19,10 +19,13 @@ NavierStokes2D::NavierStokes2D(string nome)
 
 	//---Avaliacao de propriedade---
 	gerar_linha_prop(0, 0, 0, 0, 0);
+	//---Geração de arquivos de saída
+	max_saida = 400;
+	iteracoes_por_saida = 1;
 }
 
 void NavierStokes2D::resolver_stokes_permanente()
-{
+{	
 	cout << "Montando matrizes fixas" << endl;	
 	system_clock::time_point t1 = system_clock::now();	
 	montar_matrizes_fixas(K, M, Gx, Gy);
@@ -66,6 +69,9 @@ void NavierStokes2D::resolver_stokes_permanente()
 
 void NavierStokes2D::resolver_stokes_transiente(double delta_t, unsigned long max_iter)
 {
+	iteracoes_por_saida = max_iter / max_saida;
+	if (iteracoes_por_saida < 1) iteracoes_por_saida = 1;
+
 	cout << "Montando matrizes fixas" << endl;	
 	montar_matrizes_fixas(K, M, Gx, Gy);
 
@@ -109,6 +115,9 @@ void NavierStokes2D::resolver_stokes_transiente(double delta_t, unsigned long ma
 
 void NavierStokes2D::resolver_navier_stokes(double delta_t, unsigned long max_iter, double Re, string tag)
 {
+	iteracoes_por_saida = max_iter / max_saida;
+	if (iteracoes_por_saida < 1) iteracoes_por_saida = 1;
+	
 	system_clock::time_point total1 = system_clock::now();
 	
 	cout << "Montando matrizes fixas" << endl;
@@ -448,34 +457,34 @@ vector<Triplet<double>> NavierStokes2D::montar_matriz_A(bool transiente, double 
 void NavierStokes2D::aplicar_cc_A(SparseMatrix<double, Eigen::RowMajor>& A)
 {
 	unordered_map<unsigned long, double> cc_vx_map = malha.r_cc_vx();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vx_map.begin(); it != cc_vx_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vx_map.begin(); it_map != cc_vx_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it->first); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it_map->first); it; ++it)
 		{
 			//it.valueRef() = 0;
 			A.coeffRef(it.row(), it.col()) = 0;
 		}
-		A.coeffRef(it->first, it->first) = 1;
+		A.coeffRef(it_map->first, it_map->first) = 1;
 	}	
 	unordered_map<unsigned long, double> cc_vy_map = malha.r_cc_vy();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vy_map.begin(); it != cc_vy_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vy_map.begin(); it_map != cc_vy_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it->first + gl); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it_map->first + gl); it; ++it)
 		{
 			//it.valueRef() = 0;
 			A.coeffRef(it.row(), it.col()) = 0;
 		}
-		A.coeffRef(it->first + gl, it->first + gl) = 1;
+		A.coeffRef(it_map->first + gl, it_map->first + gl) = 1;
 	}
 	unordered_map<unsigned long, double> cc_p_map = malha.r_cc_p();
-	for (unordered_map<unsigned long, double>::iterator it = cc_p_map.begin(); it != cc_p_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_p_map.begin(); it_map != cc_p_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it->first + gl * 2); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(A, it_map->first + gl * 2); it; ++it)
 		{
 			//it.valueRef() = 0;
 			A.coeffRef(it.row(), it.col()) = 0;
 		}
-		A.coeffRef(it->first + gl * 2, it->first + gl * 2) = 1;
+		A.coeffRef(it_map->first + gl * 2, it_map->first + gl * 2) = 1;
 	}
 }
 
@@ -500,6 +509,8 @@ void NavierStokes2D::aplicar_cc_B(VectorXd& B)
 
 void NavierStokes2D::gerar_arquivo_saida(VectorXd& sol, unsigned long iter, double delta_t, double Re, string tag)
 {
+	if (iter % iteracoes_por_saida != 0) return;
+	
 	fstream arquivo_saida;
 
 	string Re_string = to_string(Re);
@@ -585,6 +596,9 @@ void NavierStokes2D::gerar_arquivo_saida(VectorXd& sol, unsigned long iter, doub
 
 void NavierStokes2D::resolver_navier_stokes_projecao(double delta_t, unsigned long max_iter, double Re, string tag)
 {
+	iteracoes_por_saida = max_iter / max_saida;
+	if (iteracoes_por_saida < 1) iteracoes_por_saida = 1;
+	
 	system_clock::time_point total1 = system_clock::now();
 	
 	cout << "Montando matrizes fixas K, M, Gx e Gy" << endl;
@@ -707,49 +721,49 @@ void NavierStokes2D::resolver_navier_stokes_projecao(double delta_t, unsigned lo
 void NavierStokes2D::aplicar_cc_B_proj(SparseMatrix<double, Eigen::RowMajor>& B_proj)
 {
 	unordered_map<unsigned long, double> cc_vx_map = malha.r_cc_vx();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vx_map.begin(); it != cc_vx_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vx_map.begin(); it_map != cc_vx_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(B_proj, it->first); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(B_proj, it_map->first); it; ++it)
 		{
 			B_proj.coeffRef(it.row(), it.col()) = 0;
 		}
-		B_proj.coeffRef(it->first, it->first) = 1;
+		B_proj.coeffRef(it_map->first, it_map->first) = 1;
 	}
 	unordered_map<unsigned long, double> cc_vy_map = malha.r_cc_vy();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vy_map.begin(); it != cc_vy_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vy_map.begin(); it_map != cc_vy_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(B_proj, it->first + gl); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(B_proj, it_map->first + gl); it; ++it)
 		{
 			B_proj.coeffRef(it.row(), it.col()) = 0;
 		}
-		B_proj.coeffRef(it->first + gl, it->first + gl) = 1;
+		B_proj.coeffRef(it_map->first + gl, it_map->first + gl) = 1;
 	}
 }
 
 void NavierStokes2D::aplicar_cc_D_e_G(SparseMatrix<double, Eigen::RowMajor>& D, SparseMatrix<double, Eigen::RowMajor>& G)
 {
 	unordered_map<unsigned long, double> cc_vx_map = malha.r_cc_vx();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vx_map.begin(); it != cc_vx_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vx_map.begin(); it_map != cc_vx_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(G, it->first); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(G, it_map->first); it; ++it)
 		{
 			G.coeffRef(it.row(), it.col()) = 0;
 		}
 		//G.coeffRef(it->first, it->first) = 1;
 	}
 	unordered_map<unsigned long, double> cc_vy_map = malha.r_cc_vy();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vy_map.begin(); it != cc_vy_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vy_map.begin(); it_map != cc_vy_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(G, it->first + gl); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(G, it_map->first + gl); it; ++it)
 		{
 			G.coeffRef(it.row(), it.col()) = 0;
 		}
 		//G.coeffRef(it->first + gl, it->first) = 1;
 	}
 	unordered_map<unsigned long, double> cc_p_map = malha.r_cc_p();
-	for (unordered_map<unsigned long, double>::iterator it = cc_p_map.begin(); it != cc_p_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_p_map.begin(); it_map != cc_p_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(D, it->first); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(D, it_map->first); it; ++it)
 		{
 			D.coeffRef(it.row(), it.col()) = 0;
 		}
@@ -760,41 +774,41 @@ void NavierStokes2D::aplicar_cc_D_e_G(SparseMatrix<double, Eigen::RowMajor>& D, 
 void NavierStokes2D::aplicar_cc_E(SparseMatrix<double, Eigen::RowMajor>& E)
 {
 	unordered_map<unsigned long, double> cc_p_map = malha.r_cc_p();
-	for (unordered_map<unsigned long, double>::iterator it = cc_p_map.begin(); it != cc_p_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_p_map.begin(); it_map != cc_p_map.end(); it_map++)
 	{
-		E.coeffRef(it->first, it->first) = 1;
+		E.coeffRef(it_map->first, it_map->first) = 1;
 	}
 }
 
 void NavierStokes2D::aplicar_cc_M_v(VectorXd& M_v)
 {
 	unordered_map<unsigned long, double> cc_vx_map = malha.r_cc_vx();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vx_map.begin(); it != cc_vx_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vx_map.begin(); it_map != cc_vx_map.end(); it_map++)
 	{
-		M_v(it->first) = it->second;
+		M_v(it_map->first) = it_map->second;
 	}
 	unordered_map<unsigned long, double> cc_vy_map = malha.r_cc_vy();
-	for (unordered_map<unsigned long, double>::iterator it = cc_vy_map.begin(); it != cc_vy_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_vy_map.begin(); it_map != cc_vy_map.end(); it_map++)
 	{
-		M_v(it->first + gl) = it->second;
+		M_v(it_map->first + gl) = it_map->second;
 	}
 }
 
 void NavierStokes2D::aplicar_cc_D_v_til(VectorXd& D_v_til)
 {
 	unordered_map<unsigned long, double> cc_p_map = malha.r_cc_p();
-	for (unordered_map<unsigned long, double>::iterator it = cc_p_map.begin(); it != cc_p_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_p_map.begin(); it_map != cc_p_map.end(); it_map++)
 	{
-		D_v_til(it->first) = it->second;
+		D_v_til(it_map->first) = it_map->second;
 	}
 }
 
 void NavierStokes2D::aplicar_cc_D_B_inv_G(SparseMatrix<double, Eigen::RowMajor>& D_B_inv_G)
 {
 	unordered_map<unsigned long, double> cc_p_map = malha.r_cc_p();
-	for (unordered_map<unsigned long, double>::iterator it = cc_p_map.begin(); it != cc_p_map.end(); it++)
+	for (unordered_map<unsigned long, double>::iterator it_map = cc_p_map.begin(); it_map != cc_p_map.end(); it_map++)
 	{
-		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(D_B_inv_G, it->first); it; ++it)
+		for (SparseMatrix<double, Eigen::RowMajor>::InnerIterator it(D_B_inv_G, it_map->first); it; ++it)
 		{
 			D_B_inv_G.coeffRef(it.row(), it.col()) = 0;
 		}

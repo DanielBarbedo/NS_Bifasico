@@ -169,8 +169,6 @@ bool Semi_Lagrangiano::checar_oposicao(Elemento elem_ref, Elemento elem, int a, 
 
 void Semi_Lagrangiano::semi_lagrangiano(Malha& malha, VectorXd& vx, VectorXd& vy, double delta_t)
 {
-	system_clock::time_point total1 = system_clock::now();
-
 	mat_SL.setZero();
 	SL_triplets.clear();
 
@@ -192,9 +190,6 @@ void Semi_Lagrangiano::semi_lagrangiano(Malha& malha, VectorXd& vx, VectorXd& vy
 	//	cout << "Linha: " << it.row() << " Coluna: " << it.col() << " Valor: " << it.coeffRef() << endl;
 	//	
 	//}	
-
-	system_clock::time_point total2 = system_clock::now();
-	cout << "O tempo total do SL foi de " << duration_cast<milliseconds>(total2 - total1).count() << " milisegundos" << endl;
 }
 
 void Semi_Lagrangiano::multiplicar_SL(VectorXd& prop)
